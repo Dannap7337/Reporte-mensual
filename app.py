@@ -74,9 +74,12 @@ def calcular_estatus_solucion(row, fecha_limite):
     dias = row['DIAS'] if pd.notnull(row['DIAS']) else 0
     txt = str(row['RANGO']).lower()
     
+    # ACUMULADO: Ticket viejo (>7 días) que al final del mes seleccionado SEGUÍA ABIERTO
+    # (O sea, FIN es nulo o FIN es posterior al cierre de este mes)
     if dias > 7 and (pd.isna(row['FIN']) or row['FIN'] > fecha_limite):
         return "Acumulado"
     
+    # FUERA: Ticket cerrado en este periodo (o antes) pero que excedió tiempo
     if dias > 7 and any(x in txt for x in ['fuera', 'asap', 'programado']):
         return "Fuera"
         
@@ -154,74 +157,81 @@ if df is not None:
     pagina = st.sidebar.radio("Selecciona:", ["1. Generación", "2. Solución", "3. Contacto", "4. Resumen Anual"])
     st.sidebar.markdown("---")
     
-    # --- FILTRO MAESTRO DE AÑO CORREGIDO ---
-    selected_year = 2025
+    # 1. DETECCIÓN DE AÑOS
+    years_inicio = df['INICIO'].dt.year.dropna().unique()
+    years_fin = df['FIN'].dt.year.dropna().unique()
+    all_years = sorted(list(set(years_inicio) | set(years_fin)))
     
-    # Lógica: Incluir todo lo que "toque" el 2025.
-    # 1. Empieza en 2025
-    # 2. Termina en 2025
-    # 3. Empieza ANTES de 2025 Y (Sigue abierto O Termina después del inicio de 2025)
+    if not all_years:
+        all_years = [2025]
+
+    # 2. SELECTOR DE AÑO (FORZAR 2025 POR DEFECTO)
+    idx_default = 0
+    if 2025 in all_years:
+        idx_default = all_years.index(2025)
     
-    start_2025 = pd.Timestamp(selected_year, 1, 1)
-    
-    cond_2025 = (
-        (df['INICIO'].dt.year == selected_year) | 
-        (df['FIN'].dt.year == selected_year) | 
-        ((df['INICIO'] < start_2025) & ((df['FIN'] >= start_2025) | (df['FIN'].isna())))
-    )
-    
-    datos_2025 = df[cond_2025]
-    
-    if datos_2025.empty:
-        st.sidebar.error("No se encontraron registros activos en 2025.")
-        st.stop()
-    
-    # --- SELECTORES DE MESES (Páginas 1, 2, 3) ---
+    selected_year = st.sidebar.selectbox("Año", all_years, index=idx_default)
+
+    # 3. LÓGICA DE MESES (Páginas 1, 2, 3)
     if pagina != "4. Resumen Anual":
-        st.sidebar.selectbox("Año", [2025], disabled=True)
+        # Determinamos qué meses tienen "Tickets Activos" (Creados ese mes, Cerrados ese mes, o Abiertos desde antes)
         
-        # Buscamos meses con actividad en el 2025
+        # Inicio y fin del año seleccionado
+        start_year = pd.Timestamp(selected_year, 1, 1)
+        end_year = pd.Timestamp(selected_year, 12, 31, 23, 59, 59)
+        
+        # Filtramos DataFrame solo para detectar actividad en este año
+        cond_activos = (
+            (df['INICIO'] <= end_year) &           # Nació antes de que acabe el año
+            ((df['FIN'].isnull()) | (df['FIN'] >= start_year)) # Murió dentro del año o sigue vivo
+        )
+        df_year_activity = df[cond_activos]
+        
         meses_actividad = set()
         
-        # Actividad por Inicio
-        meses_actividad.update(df.loc[df['INICIO'].dt.year == 2025, 'INICIO'].dt.month.dropna().unique())
-        # Actividad por Fin
-        meses_actividad.update(df.loc[df['FIN'].dt.year == 2025, 'FIN'].dt.month.dropna().unique())
-        # Actividad por "Seguir Abierto" (Acumulados arrastrados)
-        # Si hay tickets abiertos desde 2024, deberían aparecer en Enero (1)
-        if not df.loc[(df['INICIO'] < start_2025) & (df['FIN'].isna())].empty:
-            meses_actividad.add(1) # Enero siempre tendrá actividad si hay pendientes
+        # Tickets que iniciaron este año
+        meses_actividad.update(df_year_activity.loc[df_year_activity['INICIO'].dt.year == selected_year, 'INICIO'].dt.month.dropna().unique())
+        # Tickets que finalizaron este año
+        meses_actividad.update(df_year_activity.loc[df_year_activity['FIN'].dt.year == selected_year, 'FIN'].dt.month.dropna().unique())
         
+        # Tickets acumulados (vienen de años anteriores)
+        # Si hay tickets que empezaron antes de este año y siguen abiertos, activamos Enero (y por ende la secuencia lógica)
+        if not df_year_activity.loc[df_year_activity['INICIO'] < start_year].empty:
+             meses_actividad.add(1)
+
         meses_map = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio',
                      7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
         
-        lista_meses_nums = sorted(list(meses_actividad))
+        # Ordenar y filtrar
+        lista_meses_nums = sorted([int(m) for m in months_actividad if pd.notnull(m)]) if 'months_actividad' in locals() else sorted([int(m) for m in meses_actividad if pd.notnull(m)])
+        
         meses_disp = [meses_map[m] for m in lista_meses_nums if m in meses_map]
         
         if not meses_disp:
-            # Si solo hay acumulados pero nada nuevo en 2025, forzamos Enero
-            meses_disp = ['Enero']
-        
+            # Fallback por si acaso
+            meses_disp = ["Enero"] 
+
         selected_month_name = st.sidebar.selectbox("Mes", meses_disp)
         selected_month_num = [k for k,v in meses_map.items() if v==selected_month_name][0]
 
-        # --- FILTRADO DEL MES SELECCIONADO ---
+        # --- FILTRO MAESTRO DEL MES (INCLUYE ACUMULADOS) ---
+        # Un ticket pertenece al reporte del mes SI:
+        # 1. Existía (Inicio) antes de que el mes terminara.
+        # 2. Seguía vivo (Fin) después de que el mes empezara.
+        
         inicio_mes = pd.Timestamp(selected_year, selected_month_num, 1)
         ultimo_dia = monthrange(selected_year, selected_month_num)[1]
         fin_mes = pd.Timestamp(selected_year, selected_month_num, ultimo_dia, 23, 59, 59)
 
-        # 1. Nació antes de que acabe el mes
         cond_inicio = df['INICIO'] <= fin_mes
-        # 2. No murió antes de que empiece el mes
         cond_fin = (df['FIN'].isnull()) | (df['FIN'] >= inicio_mes)
 
         df_f = df[cond_inicio & cond_fin].copy()
         limite = fin_mes
 
-        # Cálculos KPI
+        # Cálculos
         df_f['Estatus_Solucion'] = df_f.apply(lambda x: calcular_estatus_solucion(x, limite), axis=1)
         df_f['Detalle_Solucion'] = df_f.apply(calcular_detalle_solucion, axis=1)
-        
         if 'DIAS PRIMER CONTACTO' in df_f.columns:
             df_f['Estatus_Contacto'] = df_f['DIAS PRIMER CONTACTO'].apply(calcular_contacto)
             
@@ -229,8 +239,8 @@ if df is not None:
         st.caption(f"Datos de {selected_month_name} {selected_year}")
 
     else:
-        st.title("📈 Resumen Anual 2025")
-        st.caption("Evolución de eficiencia y métricas globales del año")
+        st.title(f"📈 Resumen Anual {selected_year}")
+        st.caption("Evolución de eficiencia y métricas globales del año seleccionado")
 
     # ---------------------------------------------------------
     # 1. GENERACIÓN
@@ -321,7 +331,7 @@ if df is not None:
     # 4. RESUMEN ANUAL
     # ---------------------------------------------------------
     elif pagina == "4. Resumen Anual":
-        df_anual = df[df['FIN'].dt.year == 2025].copy()
+        df_anual = df[df['FIN'].dt.year == selected_year].copy()
         
         if not df_anual.empty:
             total_anual = len(df_anual)
@@ -329,7 +339,7 @@ if df is not None:
             eff_anual = (tiempo_anual / total_anual * 100) if total_anual > 0 else 0
             
             c1, c2, c3 = st.columns(3)
-            c1.metric("Total Tickets 2025", total_anual)
+            c1.metric(f"Total Tickets {selected_year}", total_anual)
             c2.metric("Promedio Eficiencia Anual", f"{eff_anual:.1f}%")
             
             st.markdown("---")
@@ -371,7 +381,7 @@ if df is not None:
                 cols = ['N° TICKET', 'USUARIO', 'INICIO', 'FIN', 'DIAS', 'RANGO']
                 st.dataframe(df_anual[[c for c in cols if c in df_anual.columns]])
         else:
-            st.info("No hay tickets cerrados en 2025.")
+            st.info(f"No hay tickets cerrados en {selected_year}.")
 
 else:
     st.error("No se encontró 'Tickets año.xlsx'")
