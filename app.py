@@ -6,10 +6,8 @@ import os
 import numpy as np
 from calendar import monthrange
 
-# --- CONFIGURACIÓN ---
 st.set_page_config(page_title="Reporte TI 2025", layout="wide")
 
-# --- ESTILOS CSS ---
 st.markdown("""
     <style>
     div.stButton > button:first-child {
@@ -29,7 +27,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- CARGA DE DATOS ---
 @st.cache_data
 def load_data():
     df = None
@@ -69,21 +66,31 @@ def load_data():
 
     return df
 
-# --- LÓGICAS DE KPI ---
 def calcular_estatus_solucion(row, fecha_limite):
-    dias = row['DIAS'] if pd.notnull(row['DIAS']) else 0
+    inicio = row['INICIO']
+    fin = row['FIN']
+    
+    dias_totales_excel = row['DIAS'] if pd.notnull(row['DIAS']) else 0
     txt = str(row['RANGO']).lower()
-    
-    # ACUMULADO: Ticket viejo (>7 días) que al final del mes seleccionado SEGUÍA ABIERTO
-    # (O sea, FIN es nulo o FIN es posterior al cierre de este mes)
-    if dias > 7 and (pd.isna(row['FIN']) or row['FIN'] > fecha_limite):
-        return "Acumulado"
-    
-    # FUERA: Ticket cerrado en este periodo (o antes) pero que excedió tiempo
-    if dias > 7 and any(x in txt for x in ['fuera', 'asap', 'programado']):
-        return "Fuera"
-        
-    return "Dentro"
+
+    sigue_abierto_al_corte = pd.isna(fin) or (fin > fecha_limite)
+
+    if sigue_abierto_al_corte:
+        if pd.notnull(inicio):
+            dias_al_momento = (fecha_limite - inicio).days
+        else:
+            dias_al_momento = 0
+            
+        if dias_al_momento > 7:
+            return "Acumulado"
+        else:
+            return "Dentro"
+    else:
+        es_fuera_rango = any(x in txt for x in ['fuera', 'asap', 'programado'])
+        if dias_totales_excel > 7 or es_fuera_rango:
+            return "Fuera"
+        else:
+            return "Dentro"
 
 def calcular_detalle_solucion(row):
     padre = row['Estatus_Solucion']
@@ -157,68 +164,38 @@ if df is not None:
     pagina = st.sidebar.radio("Selecciona:", ["1. Generación", "2. Solución", "3. Contacto", "4. Resumen Anual"])
     st.sidebar.markdown("---")
     
-    # 1. DETECCIÓN DE AÑOS
-    years_inicio = df['INICIO'].dt.year.dropna().unique()
-    years_fin = df['FIN'].dt.year.dropna().unique()
-    all_years = sorted(list(set(years_inicio) | set(years_fin)))
-    
-    if not all_years:
-        all_years = [2025]
+    all_years = [2025]
+    selected_year = st.sidebar.selectbox("Año", all_years, index=0)
 
-    # 2. SELECTOR DE AÑO (FORZAR 2025 POR DEFECTO)
-    idx_default = 0
-    if 2025 in all_years:
-        idx_default = all_years.index(2025)
-    
-    selected_year = st.sidebar.selectbox("Año", all_years, index=idx_default)
-
-    # 3. LÓGICA DE MESES (Páginas 1, 2, 3)
     if pagina != "4. Resumen Anual":
-        # Determinamos qué meses tienen "Tickets Activos" (Creados ese mes, Cerrados ese mes, o Abiertos desde antes)
-        
-        # Inicio y fin del año seleccionado
         start_year = pd.Timestamp(selected_year, 1, 1)
         end_year = pd.Timestamp(selected_year, 12, 31, 23, 59, 59)
-        
-        # Filtramos DataFrame solo para detectar actividad en este año
+
         cond_activos = (
-            (df['INICIO'] <= end_year) &           # Nació antes de que acabe el año
-            ((df['FIN'].isnull()) | (df['FIN'] >= start_year)) # Murió dentro del año o sigue vivo
+            (df['INICIO'] <= end_year) & 
+            ((df['FIN'].isnull()) | (df['FIN'] >= start_year))
         )
         df_year_activity = df[cond_activos]
         
         meses_actividad = set()
-        
-        # Tickets que iniciaron este año
         meses_actividad.update(df_year_activity.loc[df_year_activity['INICIO'].dt.year == selected_year, 'INICIO'].dt.month.dropna().unique())
-        # Tickets que finalizaron este año
         meses_actividad.update(df_year_activity.loc[df_year_activity['FIN'].dt.year == selected_year, 'FIN'].dt.month.dropna().unique())
         
-        # Tickets acumulados (vienen de años anteriores)
-        # Si hay tickets que empezaron antes de este año y siguen abiertos, activamos Enero (y por ende la secuencia lógica)
         if not df_year_activity.loc[df_year_activity['INICIO'] < start_year].empty:
              meses_actividad.add(1)
 
         meses_map = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio',
                      7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
         
-        # Ordenar y filtrar
-        lista_meses_nums = sorted([int(m) for m in months_actividad if pd.notnull(m)]) if 'months_actividad' in locals() else sorted([int(m) for m in meses_actividad if pd.notnull(m)])
-        
+        lista_meses_nums = sorted([int(m) for m in meses_actividad if pd.notnull(m)])
         meses_disp = [meses_map[m] for m in lista_meses_nums if m in meses_map]
         
-        if not meses_disp:
-            # Fallback por si acaso
-            meses_disp = ["Enero"] 
+        if not meses_disp: meses_disp = ["Enero"] 
 
         selected_month_name = st.sidebar.selectbox("Mes", meses_disp)
         selected_month_num = [k for k,v in meses_map.items() if v==selected_month_name][0]
 
-        # --- FILTRO MAESTRO DEL MES (INCLUYE ACUMULADOS) ---
-        # Un ticket pertenece al reporte del mes SI:
-        # 1. Existía (Inicio) antes de que el mes terminara.
-        # 2. Seguía vivo (Fin) después de que el mes empezara.
-        
+        # Filtro maestro del mes seleccionado
         inicio_mes = pd.Timestamp(selected_year, selected_month_num, 1)
         ultimo_dia = monthrange(selected_year, selected_month_num)[1]
         fin_mes = pd.Timestamp(selected_year, selected_month_num, ultimo_dia, 23, 59, 59)
@@ -229,7 +206,7 @@ if df is not None:
         df_f = df[cond_inicio & cond_fin].copy()
         limite = fin_mes
 
-        # Cálculos
+        # Cálculos generales
         df_f['Estatus_Solucion'] = df_f.apply(lambda x: calcular_estatus_solucion(x, limite), axis=1)
         df_f['Detalle_Solucion'] = df_f.apply(calcular_detalle_solucion, axis=1)
         if 'DIAS PRIMER CONTACTO' in df_f.columns:
@@ -240,11 +217,8 @@ if df is not None:
 
     else:
         st.title(f"📈 Resumen Anual {selected_year}")
-        st.caption("Evolución de eficiencia y métricas globales del año seleccionado")
+        st.caption("Evolución de eficiencia y métricas globales")
 
-    # ---------------------------------------------------------
-    # 1. GENERACIÓN
-    # ---------------------------------------------------------
     if pagina == "1. Generación":
         col_kpi = 'Generacion_Excel'
         if col_kpi in df_f.columns and not df_f[col_kpi].isnull().all():
@@ -263,9 +237,6 @@ if df is not None:
         else:
             st.warning("No se encontró columna de Generación.")
 
-    # ---------------------------------------------------------
-    # 2. SOLUCIÓN
-    # ---------------------------------------------------------
     elif pagina == "2. Solución":
         if not df_f.empty:
             conteo_padres = df_f['Estatus_Solucion'].value_counts()
@@ -308,28 +279,28 @@ if df is not None:
                 df_show = df_f[[c for c in cols if c in df_f.columns]]
                 st.dataframe(df_show.style.apply(estilo_solucion, axis=1))
 
-    # ---------------------------------------------------------
-    # 3. CONTACTO
-    # ---------------------------------------------------------
     elif pagina == "3. Contacto":
-        if 'Estatus_Contacto' in df_f.columns:
-            d = df_f['Estatus_Contacto'].value_counts().reset_index()
-            d.columns=['E','C']
-            color_con = {'A tiempo':'#4472C4', 'Fuera':'#ed7d31'}
-            fig = px.pie(d, values='C', names='E', color='E', 
-                         color_discrete_map=color_con, hole=0.5)
-            fig.update_layout(height=600, font=dict(size=20))
-            fig.update_traces(textposition='inside', textinfo='percent+label', marker=dict(line=dict(color='#ffffff', width=2)))
-            st.plotly_chart(fig, use_container_width=True)
-            
-            with st.expander("Ver Detalle de Tickets"):
-                cols = ['N° TICKET', 'USUARIO', 'INICIO', 'DIAS PRIMER CONTACTO', 'Estatus_Contacto']
-                df_show = df_f[[c for c in cols if c in df_f.columns]]
-                st.dataframe(df_show.style.apply(estilo_contacto, axis=1))
+        # --- CAMBIO 2: Lógica de NO MOSTRAR antes de MAYO ---
+        if selected_month_num < 5:
+            st.warning(f"⚠️ **Información no disponible.**")
+            st.info(f"El KPI de 'Primer Contacto' se implementó a partir de **Mayo de 2025**. Para los meses de Enero a Abril no se cuenta con métricas.")
+        else:
+            # Aquí va el código normal de Contacto si es Mayo en adelante
+            if 'Estatus_Contacto' in df_f.columns:
+                d = df_f['Estatus_Contacto'].value_counts().reset_index()
+                d.columns=['E','C']
+                color_con = {'A tiempo':'#4472C4', 'Fuera':'#ed7d31'}
+                fig = px.pie(d, values='C', names='E', color='E', 
+                             color_discrete_map=color_con, hole=0.5)
+                fig.update_layout(height=600, font=dict(size=20))
+                fig.update_traces(textposition='inside', textinfo='percent+label', marker=dict(line=dict(color='#ffffff', width=2)))
+                st.plotly_chart(fig, use_container_width=True)
+                
+                with st.expander("Ver Detalle de Tickets"):
+                    cols = ['N° TICKET', 'USUARIO', 'INICIO', 'DIAS PRIMER CONTACTO', 'Estatus_Contacto']
+                    df_show = df_f[[c for c in cols if c in df_f.columns]]
+                    st.dataframe(df_show.style.apply(estilo_contacto, axis=1))
 
-    # ---------------------------------------------------------
-    # 4. RESUMEN ANUAL
-    # ---------------------------------------------------------
     elif pagina == "4. Resumen Anual":
         df_anual = df[df['FIN'].dt.year == selected_year].copy()
         
@@ -363,19 +334,24 @@ if df is not None:
             
             st.markdown("---")
             st.markdown("### 📞 Tendencia: Primer Contacto a Tiempo (<= 3 días)")
+            st.caption("Nota: KPI implementado a partir de Mayo. Datos anteriores no disponibles.")
             
             if 'DIAS PRIMER CONTACTO' in df_anual.columns:
                 df_anual['Contacto_Ok'] = df_anual['DIAS PRIMER CONTACTO'].apply(lambda x: 1 if (pd.notnull(x) and x <= 3) else 0)
                 tend_con = df_anual.groupby(df_anual['FIN'].dt.month)['Contacto_Ok'].mean() * 100
                 tend_con = tend_con.reset_index()
                 tend_con.columns = ['MesNum', 'Eficiencia_Contacto']
+                tend_con = tend_con[tend_con['MesNum'] >= 5]
                 tend_con['Mes'] = tend_con['MesNum'].apply(lambda x: meses_map_graf.get(x, str(x)))
                 tend_con = tend_con.sort_values('MesNum')
 
-                fig_line_con = px.line(tend_con, x='Mes', y='Eficiencia_Contacto', markers=True, text='Eficiencia_Contacto')
-                fig_line_con.update_traces(line_color='#00C853', line_width=4, marker_size=12, texttemplate='%{y:.1f}%', textposition='top center')
-                fig_line_con.update_layout(yaxis_title="% Eficiencia Contacto", xaxis_title=None, yaxis_range=[0, 115], font=dict(size=16), height=450, hovermode="x unified")
-                st.plotly_chart(fig_line_con, use_container_width=True)
+                if not tend_con.empty:
+                    fig_line_con = px.line(tend_con, x='Mes', y='Eficiencia_Contacto', markers=True, text='Eficiencia_Contacto')
+                    fig_line_con.update_traces(line_color='#00C853', line_width=4, marker_size=12, texttemplate='%{y:.1f}%', textposition='top center')
+                    fig_line_con.update_layout(yaxis_title="% Eficiencia Contacto", xaxis_title=None, yaxis_range=[0, 115], font=dict(size=16), height=450, hovermode="x unified")
+                    st.plotly_chart(fig_line_con, use_container_width=True)
+                else:
+                    st.info("Aún no hay datos cerrados a partir de Mayo para generar la tendencia.")
             
             with st.expander("Ver Datos Anuales"):
                 cols = ['N° TICKET', 'USUARIO', 'INICIO', 'FIN', 'DIAS', 'RANGO']
