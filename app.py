@@ -65,27 +65,34 @@ def load_data():
             df['Generacion_Excel'] = "No encontrado"
 
     return df
-
-def calcular_estatus_solucion(row, fecha_limite):
+    
+def calcular_estatus_solucion(row, fecha_limite, fecha_inicio_mes):
     inicio = row['INICIO']
     fin = row['FIN']
     
     dias_totales_excel = row['DIAS'] if pd.notnull(row['DIAS']) else 0
     txt = str(row['RANGO']).lower()
-
+    
+    # 1. ¿Estaba abierto al cierre del mes?
     sigue_abierto_al_corte = pd.isna(fin) or (fin > fecha_limite)
 
     if sigue_abierto_al_corte:
+        # Calcular antigüedad al corte
         if pd.notnull(inicio):
             dias_al_momento = (fecha_limite - inicio).days
         else:
             dias_al_momento = 0
-            
+        
         if dias_al_momento > 7:
-            return "Acumulado"
+            if pd.notnull(inicio) and (inicio >= fecha_inicio_mes):
+                return "Acumulado"
+            else:
+                return "IGNORAR" 
         else:
             return "Dentro"
+
     else:
+        # TICKET CERRADO EN EL MES
         es_fuera_rango = any(x in txt for x in ['fuera', 'asap', 'programado'])
         if dias_totales_excel > 7 or es_fuera_rango:
             return "Fuera"
@@ -98,13 +105,11 @@ def calcular_detalle_solucion(row):
         txt = str(row['RANGO']).lower()
         if 'program' in txt: return 'Programado'
         if 'asap' in txt: return 'Asap'
-        return 'Fuera Real'
+        return 'Fuera.'
     return np.nan 
 
 def calcular_contacto(dias):
     return "Fuera" if (pd.notnull(dias) and dias > 3) else "A tiempo"
-
-# --- FUNCIONES DE ESTILO ---
 def hex_to_rgba(hex_code, opacity=0.4):
     hex_code = hex_code.lstrip('#')
     r = int(hex_code[0:2], 16)
@@ -170,7 +175,8 @@ if df is not None:
     if pagina != "4. Resumen Anual":
         start_year = pd.Timestamp(selected_year, 1, 1)
         end_year = pd.Timestamp(selected_year, 12, 31, 23, 59, 59)
-
+        
+        # Filtros de meses disponibles
         cond_activos = (
             (df['INICIO'] <= end_year) & 
             ((df['FIN'].isnull()) | (df['FIN'] >= start_year))
@@ -180,7 +186,6 @@ if df is not None:
         meses_actividad = set()
         meses_actividad.update(df_year_activity.loc[df_year_activity['INICIO'].dt.year == selected_year, 'INICIO'].dt.month.dropna().unique())
         meses_actividad.update(df_year_activity.loc[df_year_activity['FIN'].dt.year == selected_year, 'FIN'].dt.month.dropna().unique())
-        
         if not df_year_activity.loc[df_year_activity['INICIO'] < start_year].empty:
              meses_actividad.add(1)
 
@@ -195,7 +200,6 @@ if df is not None:
         selected_month_name = st.sidebar.selectbox("Mes", meses_disp)
         selected_month_num = [k for k,v in meses_map.items() if v==selected_month_name][0]
 
-        # Filtro maestro del mes seleccionado
         inicio_mes = pd.Timestamp(selected_year, selected_month_num, 1)
         ultimo_dia = monthrange(selected_year, selected_month_num)[1]
         fin_mes = pd.Timestamp(selected_year, selected_month_num, ultimo_dia, 23, 59, 59)
@@ -206,8 +210,10 @@ if df is not None:
         df_f = df[cond_inicio & cond_fin].copy()
         limite = fin_mes
 
-        # Cálculos generales
-        df_f['Estatus_Solucion'] = df_f.apply(lambda x: calcular_estatus_solucion(x, limite), axis=1)
+        df_f['Estatus_Solucion'] = df_f.apply(lambda x: calcular_estatus_solucion(x, limite, inicio_mes), axis=1)
+
+        df_f = df_f[df_f['Estatus_Solucion'] != 'IGNORAR']
+
         df_f['Detalle_Solucion'] = df_f.apply(calcular_detalle_solucion, axis=1)
         if 'DIAS PRIMER CONTACTO' in df_f.columns:
             df_f['Estatus_Contacto'] = df_f['DIAS PRIMER CONTACTO'].apply(calcular_contacto)
@@ -242,9 +248,12 @@ if df is not None:
             conteo_padres = df_f['Estatus_Solucion'].value_counts()
             df_fuera = df_f[df_f['Estatus_Solucion'] == 'Fuera']
             conteo_hijos = df_fuera['Detalle_Solucion'].value_counts()
-
-            C_DENTRO = '#4472C4'; C_ACUMULADO = '#FFC000'; C_FUERA_PADRE = '#ED7D31' 
+            
+            C_DENTRO = '#4472C4'
+            C_ACUMULADO = '#FFC000' 
+            C_FUERA_PADRE = '#ED7D31' 
             C_FUERA_REAL = '#ED7D31'; C_ASAP = '#A5A5A5'; C_PROG = '#70AD47'        
+            
             ids, labels, parents, values, colors = [], [], [], [], []
 
             if 'Dentro' in conteo_padres:
@@ -280,12 +289,10 @@ if df is not None:
                 st.dataframe(df_show.style.apply(estilo_solucion, axis=1))
 
     elif pagina == "3. Contacto":
-        # --- CAMBIO 2: Lógica de NO MOSTRAR antes de MAYO ---
         if selected_month_num < 5:
             st.warning(f"⚠️ **Información no disponible.**")
             st.info(f"El KPI de 'Primer Contacto' se implementó a partir de **Mayo de 2025**. Para los meses de Enero a Abril no se cuenta con métricas.")
         else:
-            # Aquí va el código normal de Contacto si es Mayo en adelante
             if 'Estatus_Contacto' in df_f.columns:
                 d = df_f['Estatus_Contacto'].value_counts().reset_index()
                 d.columns=['E','C']
@@ -314,7 +321,7 @@ if df is not None:
             c2.metric("Promedio Eficiencia Anual", f"{eff_anual:.1f}%")
             
             st.markdown("---")
-            st.markdown("### 📈 Tendencia: Tickets Cerrados en Tiempo (<= 7 días)")
+            st.markdown("### 📈 Tendencia: Tickets Cerrados en Tiempo (7 días)")
             
             df_anual['Cumple'] = df_anual['DIAS'].apply(lambda x: 1 if x <= 7 else 0)
             tendencia = df_anual.groupby(df_anual['FIN'].dt.month)['Cumple'].mean() * 100
@@ -333,8 +340,8 @@ if df is not None:
             st.plotly_chart(fig_line, use_container_width=True)
             
             st.markdown("---")
-            st.markdown("### 📞 Tendencia: Primer Contacto a Tiempo (<= 3 días)")
-            st.caption("Nota: KPI implementado a partir de Mayo. Datos anteriores no disponibles.")
+            st.markdown("### 📞 Tendencia: Primer Contacto a Tiempo (3 días)")
+            st.caption("Nota: KPI implementado a partir de Mayo.")
             
             if 'DIAS PRIMER CONTACTO' in df_anual.columns:
                 df_anual['Contacto_Ok'] = df_anual['DIAS PRIMER CONTACTO'].apply(lambda x: 1 if (pd.notnull(x) and x <= 3) else 0)
@@ -344,7 +351,7 @@ if df is not None:
                 tend_con = tend_con[tend_con['MesNum'] >= 5]
                 tend_con['Mes'] = tend_con['MesNum'].apply(lambda x: meses_map_graf.get(x, str(x)))
                 tend_con = tend_con.sort_values('MesNum')
-
+                
                 if not tend_con.empty:
                     fig_line_con = px.line(tend_con, x='Mes', y='Eficiencia_Contacto', markers=True, text='Eficiencia_Contacto')
                     fig_line_con.update_traces(line_color='#00C853', line_width=4, marker_size=12, texttemplate='%{y:.1f}%', textposition='top center')
