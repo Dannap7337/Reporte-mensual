@@ -8,6 +8,7 @@ from calendar import monthrange
 
 st.set_page_config(page_title="Reporte TI 2025", layout="wide")
 
+# --- CSS ---
 st.markdown("""
     <style>
     div.stButton > button:first-child {
@@ -24,48 +25,26 @@ st.markdown("""
     [data-testid="stMetricValue"] {
         font-size: 26px;
     }
+    .timeline-link {
+        font-size: 18px;
+        font-weight: bold;
+        color: #4472C4;
+        text-decoration: none;
+        padding: 10px;
+        border: 1px solid #4472C4;
+        border-radius: 5px;
+        display: inline-block;
+        margin-top: 10px;
+    }
+    .timeline-link:hover {
+        background-color: #4472C4;
+        color: white;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data
-def load_data():
-    df = None
-    posibles = ["Tickets año.xlsx", "Tickets año.xls", "Tickets año.csv"]
-    archivo_encontrado = None
-    
-    for f in posibles:
-        if os.path.exists(f):
-            archivo_encontrado = f
-            break
-            
-    if archivo_encontrado:
-        try: 
-            df = pd.read_excel(archivo_encontrado) if 'xls' in archivo_encontrado else pd.read_csv(archivo_encontrado)
-        except Exception as e:
-            st.error(f"Error al leer el archivo: {e}")
-            return None
-    else:
-        return None
-    
-    if df is not None:
-        df.columns = df.columns.str.strip()
-        for c in ['INICIO', 'FIN', 'CORREO']:
-            if c in df.columns: 
-                df[c] = pd.to_datetime(df[c], dayfirst=True, errors='coerce')
-        
-        col_gen_real = None
-        for col in df.columns:
-            if "GENERACI" in col.upper() and "TICKET" in col.upper():
-                col_gen_real = col
-                break
-        
-        if col_gen_real:
-            df.rename(columns={col_gen_real: 'Generacion_Excel'}, inplace=True)
-        else:
-            df['Generacion_Excel'] = "No encontrado"
+# --- FUNCIONES DE LÓGICA ---
 
-    return df
-    
 def calcular_estatus_solucion(row, fecha_limite, fecha_inicio_mes):
     inicio = row['INICIO']
     fin = row['FIN']
@@ -77,7 +56,6 @@ def calcular_estatus_solucion(row, fecha_limite, fecha_inicio_mes):
     sigue_abierto_al_corte = pd.isna(fin) or (fin > fecha_limite)
 
     if sigue_abierto_al_corte:
-        # Calcular antigüedad al corte
         if pd.notnull(inicio):
             dias_al_momento = (fecha_limite - inicio).days
         else:
@@ -110,6 +88,9 @@ def calcular_detalle_solucion(row):
 
 def calcular_contacto(dias):
     return "Fuera" if (pd.notnull(dias) and dias > 3) else "A tiempo"
+
+# --- FUNCIONES DE ESTILO ---
+
 def hex_to_rgba(hex_code, opacity=0.4):
     hex_code = hex_code.lstrip('#')
     r = int(hex_code[0:2], 16)
@@ -156,15 +137,84 @@ def estilo_contacto(row):
         return [f'background-color: {rgba}; color: black'] * len(row)
     return [''] * len(row)
 
+# --- CARGA DE DATOS (CACHÉ NIVEL 1: Lectura) ---
+@st.cache_data(ttl=300) # Se recarga cada 5 minutos si cambia el archivo
+def load_data():
+    df = None
+    posibles = ["Tickets año.xlsx", "Tickets año.xls", "Tickets año.csv"]
+    archivo_encontrado = None
+    
+    for f in posibles:
+        if os.path.exists(f):
+            archivo_encontrado = f
+            break
+            
+    if archivo_encontrado:
+        try: 
+            df = pd.read_excel(archivo_encontrado) if 'xls' in archivo_encontrado else pd.read_csv(archivo_encontrado)
+        except Exception as e:
+            return None
+    else:
+        return None
+    
+    if df is not None:
+        df.columns = df.columns.str.strip()
+        for c in ['INICIO', 'FIN', 'CORREO']:
+            if c in df.columns: 
+                df[c] = pd.to_datetime(df[c], dayfirst=True, errors='coerce')
+        
+        col_gen_real = None
+        for col in df.columns:
+            if "GENERACI" in col.upper() and "TICKET" in col.upper():
+                col_gen_real = col
+                break
+        
+        if col_gen_real:
+            df.rename(columns={col_gen_real: 'Generacion_Excel'}, inplace=True)
+        else:
+            df['Generacion_Excel'] = "No encontrado"
+
+    return df
+
+# --- PROCESAMIENTO MENSUAL (CACHÉ NIVEL 2: Cálculos Pesados) ---
+@st.cache_data
+def get_data_mensual(df, year, month_num):
+    """
+    Filtra y calcula las columnas complejas. 
+    Al tener cache, si cambias de pestaña (Grafica 1 a Grafica 2) NO recalcula,
+    usando el resultado anterior instantáneamente.
+    """
+    inicio_mes = pd.Timestamp(year, month_num, 1)
+    ultimo_dia = monthrange(year, month_num)[1]
+    fin_mes = pd.Timestamp(year, month_num, ultimo_dia, 23, 59, 59)
+
+    # Filtro fechas
+    cond_inicio = df['INICIO'] <= fin_mes
+    cond_fin = (df['FIN'].isnull()) | (df['FIN'] >= inicio_mes)
+    
+    df_f = df[cond_inicio & cond_fin].copy()
+    
+    # Cálculo pesado
+    df_f['Estatus_Solucion'] = df_f.apply(lambda x: calcular_estatus_solucion(x, fin_mes, inicio_mes), axis=1)
+    
+    # Filtrar IGNORAR
+    df_f = df_f[df_f['Estatus_Solucion'] != 'IGNORAR']
+    
+    # Cálculos secundarios
+    df_f['Detalle_Solucion'] = df_f.apply(calcular_detalle_solucion, axis=1)
+    
+    if 'DIAS PRIMER CONTACTO' in df_f.columns:
+        df_f['Estatus_Contacto'] = df_f['DIAS PRIMER CONTACTO'].apply(calcular_contacto)
+        
+    return df_f, inicio_mes, fin_mes
+
 # --- APP ---
 df = load_data()
 
 if df is not None:
     st.sidebar.title("Menú Principal")
-    if st.sidebar.button("🔄 Recargar Excel"):
-        load_data.clear()
-        st.rerun()
-
+    # BOTÓN ELIMINADO AQUI
+    
     st.sidebar.markdown("---")
     pagina = st.sidebar.radio("Selecciona:", ["1. Generación", "2. Solución", "3. Contacto", "4. Resumen Anual"])
     st.sidebar.markdown("---")
@@ -172,52 +222,36 @@ if df is not None:
     all_years = [2025]
     selected_year = st.sidebar.selectbox("Año", all_years, index=0)
 
+    # Lógica de Fechas Global
+    start_year = pd.Timestamp(selected_year, 1, 1)
+    end_year = pd.Timestamp(selected_year, 12, 31, 23, 59, 59)
+    
+    # Determinar meses activos (solo para mostrar en la lista)
+    cond_activos = (
+        (df['INICIO'] <= end_year) & 
+        ((df['FIN'].isnull()) | (df['FIN'] >= start_year))
+    )
+    df_year_activity = df[cond_activos]
+    meses_actividad = set()
+    meses_actividad.update(df_year_activity.loc[df_year_activity['INICIO'].dt.year == selected_year, 'INICIO'].dt.month.dropna().unique())
+    meses_actividad.update(df_year_activity.loc[df_year_activity['FIN'].dt.year == selected_year, 'FIN'].dt.month.dropna().unique())
+    if not df_year_activity.loc[df_year_activity['INICIO'] < start_year].empty:
+            meses_actividad.add(1)
+
+    meses_map = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio',
+                    7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
+    
+    lista_meses_nums = sorted([int(m) for m in meses_actividad if pd.notnull(m)])
+    meses_disp = [meses_map[m] for m in lista_meses_nums if m in meses_map]
+    if not meses_disp: meses_disp = ["Enero"] 
+
     if pagina != "4. Resumen Anual":
-        start_year = pd.Timestamp(selected_year, 1, 1)
-        end_year = pd.Timestamp(selected_year, 12, 31, 23, 59, 59)
-        
-        # Filtros de meses disponibles
-        cond_activos = (
-            (df['INICIO'] <= end_year) & 
-            ((df['FIN'].isnull()) | (df['FIN'] >= start_year))
-        )
-        df_year_activity = df[cond_activos]
-        
-        meses_actividad = set()
-        meses_actividad.update(df_year_activity.loc[df_year_activity['INICIO'].dt.year == selected_year, 'INICIO'].dt.month.dropna().unique())
-        meses_actividad.update(df_year_activity.loc[df_year_activity['FIN'].dt.year == selected_year, 'FIN'].dt.month.dropna().unique())
-        if not df_year_activity.loc[df_year_activity['INICIO'] < start_year].empty:
-             meses_actividad.add(1)
-
-        meses_map = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio',
-                     7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
-        
-        lista_meses_nums = sorted([int(m) for m in meses_actividad if pd.notnull(m)])
-        meses_disp = [meses_map[m] for m in lista_meses_nums if m in meses_map]
-        
-        if not meses_disp: meses_disp = ["Enero"] 
-
         selected_month_name = st.sidebar.selectbox("Mes", meses_disp)
         selected_month_num = [k for k,v in meses_map.items() if v==selected_month_name][0]
 
-        inicio_mes = pd.Timestamp(selected_year, selected_month_num, 1)
-        ultimo_dia = monthrange(selected_year, selected_month_num)[1]
-        fin_mes = pd.Timestamp(selected_year, selected_month_num, ultimo_dia, 23, 59, 59)
+        # AQUÍ USAMOS LA FUNCIÓN CACHEADA PARA EVITAR TRABAS
+        df_f, inicio_mes, fin_mes = get_data_mensual(df, selected_year, selected_month_num)
 
-        cond_inicio = df['INICIO'] <= fin_mes
-        cond_fin = (df['FIN'].isnull()) | (df['FIN'] >= inicio_mes)
-
-        df_f = df[cond_inicio & cond_fin].copy()
-        limite = fin_mes
-
-        df_f['Estatus_Solucion'] = df_f.apply(lambda x: calcular_estatus_solucion(x, limite, inicio_mes), axis=1)
-
-        df_f = df_f[df_f['Estatus_Solucion'] != 'IGNORAR']
-
-        df_f['Detalle_Solucion'] = df_f.apply(calcular_detalle_solucion, axis=1)
-        if 'DIAS PRIMER CONTACTO' in df_f.columns:
-            df_f['Estatus_Contacto'] = df_f['DIAS PRIMER CONTACTO'].apply(calcular_contacto)
-            
         st.title(f"📊 {pagina}")
         st.caption(f"Datos de {selected_month_name} {selected_year}")
 
@@ -225,6 +259,7 @@ if df is not None:
         st.title(f"📈 Resumen Anual {selected_year}")
         st.caption("Evolución de eficiencia y métricas globales")
 
+    # --- PÁGINA 1: GENERACIÓN ---
     if pagina == "1. Generación":
         col_kpi = 'Generacion_Excel'
         if col_kpi in df_f.columns and not df_f[col_kpi].isnull().all():
@@ -243,6 +278,7 @@ if df is not None:
         else:
             st.warning("No se encontró columna de Generación.")
 
+    # --- PÁGINA 2: SOLUCIÓN ---
     elif pagina == "2. Solución":
         if not df_f.empty:
             conteo_padres = df_f['Estatus_Solucion'].value_counts()
@@ -282,16 +318,49 @@ if df is not None:
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("No hay datos.")
+            
+            # --- SECCIÓN: 5 PEORES TICKETS ---
+            if selected_month_num >= 8:
+                st.markdown("---")
+                st.subheader(f"⚠️ Top 5 Tickets cerrados con mayor demora ({selected_month_name})")
+                
+                if 'DIAS' in df_f.columns:
+                    mask_cerrados = (df_f['FIN'].dt.month == selected_month_num) & (df_f['FIN'].dt.year == selected_year)
+                    df_peores = df_f[mask_cerrados & df_f['DIAS'].notnull()].sort_values(by='DIAS', ascending=False).head(5)
+                    
+                    if not df_peores.empty:
+                        cols_peores = ['N° TICKET', 'USUARIO', 'INICIO', 'FIN', 'DIAS', 'Detalle_Solucion']
+                        cols_mostrar = [c for c in cols_peores if c in df_peores.columns]
+                        st.table(df_peores[cols_mostrar].style.format({"DIAS": "{:.0f}", "FIN": "{:%d-%m-%Y}"}))
+
+                        links_timeline = {
+                            8: "https://lucid.app/lucidspark/543f6a91-1a33-4c3b-a36a-c1aa7ed7e063/edit?invitationId=inv_cc6d1591-c99a-4b82-b334-9898dbadd8b8",
+                            9: "https://lucid.app/lucidspark/b6d966fe-81c8-4c80-b434-8b887b9f478c/edit?invitationId=inv_0789d6c9-c78c-43fa-b137-445bee6dd70c",
+                            10: "https://lucid.app/lucidspark/fa0b5127-cb34-48b6-ab4d-760d38ac95d5/edit?invitationId=inv_f9d4919f-3afb-4862-8abd-a3fa7e90c52a",
+                            11: "https://lucid.app/lucidspark/487992bf-7d7d-4eab-a389-6ccfae58c557/edit?viewport_loc=-8951%2C-2020%2C1500%2C1293%2C0_0&invitationId=inv_25f6128c-a3ec-4f65-a58f-21be6ac896c6",
+                            12: "https://lucid.app/lucidspark/fd3b8c79-5408-495f-b2ac-f1a58b043db7/edit?viewport_loc=-13905%2C-2615%2C10784%2C4642%2C0_0&invitationId=inv_54a83472-e357-462a-9493-7172fe0b7757"
+                        }
+                        url_timeline = links_timeline.get(selected_month_num)
+                        
+                        if url_timeline:
+                            st.markdown(f'<a href="{url_timeline}" target="_blank" class="timeline-link">🔗 Ver Línea de Tiempo de estos Tickets</a>', unsafe_allow_html=True)
+                        else:
+                            st.caption("ℹ️ No hay enlace configurado para este mes.")
+                    else:
+                        st.info(f"No hay tickets cerrados en {selected_month_name} con información de días.")
+                else:
+                    st.warning("La columna 'DIAS' no existe en el archivo.")
 
             with st.expander("Ver Detalle de Tickets"):
                 cols = ['N° TICKET', 'USUARIO', 'INICIO', 'FIN', 'DIAS', 'RANGO', 'Estatus_Solucion', 'Detalle_Solucion']
                 df_show = df_f[[c for c in cols if c in df_f.columns]]
                 st.dataframe(df_show.style.apply(estilo_solucion, axis=1))
 
+    # --- PÁGINA 3: CONTACTO ---
     elif pagina == "3. Contacto":
         if selected_month_num < 5:
             st.warning(f"⚠️ **Información no disponible.**")
-            st.info(f"El KPI de 'Primer Contacto' se implementó a partir de **Mayo de 2025**. Para los meses de Enero a Abril no se cuenta con métricas.")
+            st.info(f"El KPI de 'Primer Contacto' se implementó a partir de **Mayo de 2025**.")
         else:
             if 'Estatus_Contacto' in df_f.columns:
                 d = df_f['Estatus_Contacto'].value_counts().reset_index()
@@ -308,6 +377,7 @@ if df is not None:
                     df_show = df_f[[c for c in cols if c in df_f.columns]]
                     st.dataframe(df_show.style.apply(estilo_contacto, axis=1))
 
+    # --- PÁGINA 4: RESUMEN ANUAL ---
     elif pagina == "4. Resumen Anual":
         df_anual = df[df['FIN'].dt.year == selected_year].copy()
         
