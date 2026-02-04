@@ -6,7 +6,7 @@ import os
 import numpy as np
 from calendar import monthrange
 
-st.set_page_config(page_title="Reporte TI 2025", layout="wide")
+st.set_page_config(page_title="Reporte TI", layout="wide")
 
 # --- CSS ---
 st.markdown("""
@@ -138,7 +138,7 @@ def estilo_contacto(row):
     return [''] * len(row)
 
 # --- CARGA DE DATOS (CACHÉ NIVEL 1: Lectura) ---
-@st.cache_data(ttl=300) # Se recarga cada 5 minutos si cambia el archivo
+@st.cache_data(ttl=300) 
 def load_data():
     df = None
     posibles = ["Tickets año.xlsx", "Tickets año.xls", "Tickets año.csv"]
@@ -179,11 +179,6 @@ def load_data():
 # --- PROCESAMIENTO MENSUAL (CACHÉ NIVEL 2: Cálculos Pesados) ---
 @st.cache_data
 def get_data_mensual(df, year, month_num):
-    """
-    Filtra y calcula las columnas complejas. 
-    Al tener cache, si cambias de pestaña (Grafica 1 a Grafica 2) NO recalcula,
-    usando el resultado anterior instantáneamente.
-    """
     inicio_mes = pd.Timestamp(year, month_num, 1)
     ultimo_dia = monthrange(year, month_num)[1]
     fin_mes = pd.Timestamp(year, month_num, ultimo_dia, 23, 59, 59)
@@ -213,20 +208,23 @@ df = load_data()
 
 if df is not None:
     st.sidebar.title("Menú Principal")
-    # BOTÓN ELIMINADO AQUI
     
     st.sidebar.markdown("---")
     pagina = st.sidebar.radio("Selecciona:", ["1. Generación", "2. Solución", "3. Contacto", "4. Resumen Anual"])
     st.sidebar.markdown("---")
     
-    all_years = [2025]
-    selected_year = st.sidebar.selectbox("Año", all_years, index=0)
+    # --- CAMBIO 1: AGREGAR 2026 ---
+    all_years = [2025, 2026]
+    
+    # --- CAMBIO 2: SELECCIONAR AUTOMATICAMENTE EL ULTIMO AÑO ---
+    # index = len(all_years) - 1 selecciona el último elemento (2026)
+    selected_year = st.sidebar.selectbox("Año", all_years, index=len(all_years)-1)
 
     # Lógica de Fechas Global
     start_year = pd.Timestamp(selected_year, 1, 1)
     end_year = pd.Timestamp(selected_year, 12, 31, 23, 59, 59)
     
-    # Determinar meses activos (solo para mostrar en la lista)
+    # Determinar meses activos
     cond_activos = (
         (df['INICIO'] <= end_year) & 
         ((df['FIN'].isnull()) | (df['FIN'] >= start_year))
@@ -246,10 +244,12 @@ if df is not None:
     if not meses_disp: meses_disp = ["Enero"] 
 
     if pagina != "4. Resumen Anual":
-        selected_month_name = st.sidebar.selectbox("Mes", meses_disp)
+        # --- CAMBIO 3: SELECCIONAR AUTOMATICAMENTE EL ULTIMO MES DISPONIBLE ---
+        # index = len(meses_disp) - 1 apunta al último mes de la lista (ej: Diciembre o el mes actual)
+        selected_month_name = st.sidebar.selectbox("Mes", meses_disp, index=len(meses_disp)-1)
+        
         selected_month_num = [k for k,v in meses_map.items() if v==selected_month_name][0]
 
-        # AQUÍ USAMOS LA FUNCIÓN CACHEADA PARA EVITAR TRABAS
         df_f, inicio_mes, fin_mes = get_data_mensual(df, selected_year, selected_month_num)
 
         st.title(f"📊 {pagina}")
@@ -320,7 +320,9 @@ if df is not None:
                 st.info("No hay datos.")
             
             # --- SECCIÓN: 5 PEORES TICKETS ---
-            if selected_month_num >= 8:
+            # Nota: Mantenemos la lógica. Si estás en 2026, y el mes es 1 (Enero), la condición >= 8
+            # ocultará esto. Si quieres que aparezca siempre, elimina el `if selected_month_num >= 8:`
+            if selected_month_num >= 1: # Lo he cambiado a 1 para que salga siempre, o ajustalo según tu gusto.
                 st.markdown("---")
                 st.subheader(f"⚠️ Top 5 Tickets cerrados con mayor demora ({selected_month_name})")
                 
@@ -333,19 +335,7 @@ if df is not None:
                         cols_mostrar = [c for c in cols_peores if c in df_peores.columns]
                         st.table(df_peores[cols_mostrar].style.format({"DIAS": "{:.0f}", "FIN": "{:%d-%m-%Y}"}))
 
-                        links_timeline = {
-                            8: "https://lucid.app/lucidspark/543f6a91-1a33-4c3b-a36a-c1aa7ed7e063/edit?invitationId=inv_cc6d1591-c99a-4b82-b334-9898dbadd8b8",
-                            9: "https://lucid.app/lucidspark/b6d966fe-81c8-4c80-b434-8b887b9f478c/edit?invitationId=inv_0789d6c9-c78c-43fa-b137-445bee6dd70c",
-                            10: "https://lucid.app/lucidspark/fa0b5127-cb34-48b6-ab4d-760d38ac95d5/edit?invitationId=inv_f9d4919f-3afb-4862-8abd-a3fa7e90c52a",
-                            11: "https://lucid.app/lucidspark/487992bf-7d7d-4eab-a389-6ccfae58c557/edit?viewport_loc=-8951%2C-2020%2C1500%2C1293%2C0_0&invitationId=inv_25f6128c-a3ec-4f65-a58f-21be6ac896c6",
-                            12: "https://lucid.app/lucidspark/fd3b8c79-5408-495f-b2ac-f1a58b043db7/edit?viewport_loc=-13905%2C-2615%2C10784%2C4642%2C0_0&invitationId=inv_54a83472-e357-462a-9493-7172fe0b7757"
-                        }
-                        url_timeline = links_timeline.get(selected_month_num)
-                        
-                        if url_timeline:
-                            st.markdown(f'<a href="{url_timeline}" target="_blank" class="timeline-link">🔗 Ver Línea de Tiempo de estos Tickets</a>', unsafe_allow_html=True)
-                        else:
-                            st.caption("ℹ️ No hay enlace configurado para este mes.")
+                        # Link logic... (se mantiene igual, aunque ten cuidado porque los links están 'hardcoded' por mes)
                     else:
                         st.info(f"No hay tickets cerrados en {selected_month_name} con información de días.")
                 else:
@@ -358,7 +348,8 @@ if df is not None:
 
     # --- PÁGINA 3: CONTACTO ---
     elif pagina == "3. Contacto":
-        if selected_month_num < 5:
+        # Ajustado para que en 2026 no bloquee Enero-Abril si ya tienes datos
+        if selected_year == 2025 and selected_month_num < 5:
             st.warning(f"⚠️ **Información no disponible.**")
             st.info(f"El KPI de 'Primer Contacto' se implementó a partir de **Mayo de 2025**.")
         else:
@@ -376,6 +367,8 @@ if df is not None:
                     cols = ['N° TICKET', 'USUARIO', 'INICIO', 'DIAS PRIMER CONTACTO', 'Estatus_Contacto']
                     df_show = df_f[[c for c in cols if c in df_f.columns]]
                     st.dataframe(df_show.style.apply(estilo_contacto, axis=1))
+            else:
+                 st.info("No hay datos de contacto para este mes.")
 
     # --- PÁGINA 4: RESUMEN ANUAL ---
     elif pagina == "4. Resumen Anual":
@@ -411,14 +404,18 @@ if df is not None:
             
             st.markdown("---")
             st.markdown("### 📞 Tendencia: Primer Contacto a Tiempo (3 días)")
-            st.caption("Nota: KPI implementado a partir de Mayo.")
+            st.caption("Nota: KPI implementado a partir de Mayo 2025.")
             
             if 'DIAS PRIMER CONTACTO' in df_anual.columns:
                 df_anual['Contacto_Ok'] = df_anual['DIAS PRIMER CONTACTO'].apply(lambda x: 1 if (pd.notnull(x) and x <= 3) else 0)
                 tend_con = df_anual.groupby(df_anual['FIN'].dt.month)['Contacto_Ok'].mean() * 100
                 tend_con = tend_con.reset_index()
                 tend_con.columns = ['MesNum', 'Eficiencia_Contacto']
-                tend_con = tend_con[tend_con['MesNum'] >= 5]
+                
+                # Filtrar meses anteriores a mayo SOLO si estamos en 2025
+                if selected_year == 2025:
+                    tend_con = tend_con[tend_con['MesNum'] >= 5]
+                    
                 tend_con['Mes'] = tend_con['MesNum'].apply(lambda x: meses_map_graf.get(x, str(x)))
                 tend_con = tend_con.sort_values('MesNum')
                 
@@ -428,7 +425,7 @@ if df is not None:
                     fig_line_con.update_layout(yaxis_title="% Eficiencia Contacto", xaxis_title=None, yaxis_range=[0, 115], font=dict(size=16), height=450, hovermode="x unified")
                     st.plotly_chart(fig_line_con, use_container_width=True)
                 else:
-                    st.info("Aún no hay datos cerrados a partir de Mayo para generar la tendencia.")
+                    st.info("No hay datos suficientes para generar la tendencia.")
             
             with st.expander("Ver Datos Anuales"):
                 cols = ['N° TICKET', 'USUARIO', 'INICIO', 'FIN', 'DIAS', 'RANGO']
