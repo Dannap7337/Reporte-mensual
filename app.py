@@ -8,6 +8,19 @@ from calendar import monthrange
 
 st.set_page_config(page_title="Reporte TI", layout="wide")
 
+# --- CONFIGURACIÓN DE ENLACES (NUEVO) ---
+# Agrega aquí tus enlaces. El formato es: (AÑO, MES): "URL"
+LINKS_TIMELINE = {
+    (2025, 8): "https://tu-enlace-agosto.com",
+    (2025, 9): "https://tu-enlace-septiembre.com",
+    (2025, 10): "https://tu-enlace-octubre.com",
+    (2025, 11): "https://tu-enlace-noviembre.com",
+    (2025, 12): "https://tu-enlace-diciembre.com",
+    (2026, 1): "https://tu-enlace-enero-2026.com",
+    (2026, 2): "https://tu-enlace-febrero-2026.com",
+    # Agrega más meses aquí...
+}
+
 # --- CSS ---
 st.markdown("""
     <style>
@@ -26,19 +39,20 @@ st.markdown("""
         font-size: 26px;
     }
     .timeline-link {
-        font-size: 18px;
+        font-size: 16px;
         font-weight: bold;
-        color: #4472C4;
+        color: #4472C4 !important;
         text-decoration: none;
-        padding: 10px;
-        border: 1px solid #4472C4;
-        border-radius: 5px;
+        padding: 8px 15px;
+        border: 2px solid #4472C4;
+        border-radius: 8px;
         display: inline-block;
-        margin-top: 10px;
+        margin-top: 15px;
+        transition: all 0.3s ease;
     }
     .timeline-link:hover {
         background-color: #4472C4;
-        color: white;
+        color: white !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -213,11 +227,7 @@ if df is not None:
     pagina = st.sidebar.radio("Selecciona:", ["1. Generación", "2. Solución", "3. Contacto", "4. Resumen Anual"])
     st.sidebar.markdown("---")
     
-    # --- CAMBIO 1: AGREGAR 2026 ---
     all_years = [2025, 2026]
-    
-    # --- CAMBIO 2: SELECCIONAR AUTOMATICAMENTE EL ULTIMO AÑO ---
-    # index = len(all_years) - 1 selecciona el último elemento (2026)
     selected_year = st.sidebar.selectbox("Año", all_years, index=len(all_years)-1)
 
     # Lógica de Fechas Global
@@ -244,10 +254,7 @@ if df is not None:
     if not meses_disp: meses_disp = ["Enero"] 
 
     if pagina != "4. Resumen Anual":
-        # --- CAMBIO 3: SELECCIONAR AUTOMATICAMENTE EL ULTIMO MES DISPONIBLE ---
-        # index = len(meses_disp) - 1 apunta al último mes de la lista (ej: Diciembre o el mes actual)
         selected_month_name = st.sidebar.selectbox("Mes", meses_disp, index=len(meses_disp)-1)
-        
         selected_month_num = [k for k,v in meses_map.items() if v==selected_month_name][0]
 
         df_f, inicio_mes, fin_mes = get_data_mensual(df, selected_year, selected_month_num)
@@ -320,9 +327,7 @@ if df is not None:
                 st.info("No hay datos.")
             
             # --- SECCIÓN: 5 PEORES TICKETS ---
-            # Nota: Mantenemos la lógica. Si estás en 2026, y el mes es 1 (Enero), la condición >= 8
-            # ocultará esto. Si quieres que aparezca siempre, elimina el `if selected_month_num >= 8:`
-            if selected_month_num >= 1: # Lo he cambiado a 1 para que salga siempre, o ajustalo según tu gusto.
+            if selected_month_num >= 1: 
                 st.markdown("---")
                 st.subheader(f"⚠️ Top 5 Tickets cerrados con mayor demora ({selected_month_name})")
                 
@@ -335,7 +340,17 @@ if df is not None:
                         cols_mostrar = [c for c in cols_peores if c in df_peores.columns]
                         st.table(df_peores[cols_mostrar].style.format({"DIAS": "{:.0f}", "FIN": "{:%d-%m-%Y}"}))
 
-                        # Link logic... (se mantiene igual, aunque ten cuidado porque los links están 'hardcoded' por mes)
+                        if (selected_year == 2025 and selected_month_num >= 8) or (selected_year > 2025):
+                            enlace_actual = LINKS_TIMELINE.get((selected_year, selected_month_num))
+                            
+                            if enlace_actual:
+                                st.markdown(
+                                    f'<a href="{enlace_actual}" class="timeline-link" target="_blank">📅 Ver Línea de Tiempo: TOP 5 tickets</a>', 
+                                    unsafe_allow_html=True
+                                )
+                            else:
+                                st.caption("🚫 No hay enlace configurado para este mes aún.")
+
                     else:
                         st.info(f"No hay tickets cerrados en {selected_month_name} con información de días.")
                 else:
@@ -348,7 +363,6 @@ if df is not None:
 
     # --- PÁGINA 3: CONTACTO ---
     elif pagina == "3. Contacto":
-        # Ajustado para que en 2026 no bloquee Enero-Abril si ya tienes datos
         if selected_year == 2025 and selected_month_num < 5:
             st.warning(f"⚠️ **Información no disponible.**")
             st.info(f"El KPI de 'Primer Contacto' se implementó a partir de **Mayo de 2025**.")
