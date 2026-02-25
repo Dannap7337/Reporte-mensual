@@ -16,7 +16,6 @@ LINKS_TIMELINE = {
     (2025, 12): "https://lucid.app/lucidspark/fd3b8c79-5408-495f-b2ac-f1a58b043db7/edit?invitationId=inv_54a83472-e357-462a-9493-7172fe0b7757"
 }
 
-# --- CSS ---
 st.markdown("""
     <style>
     div.stButton > button:first-child {
@@ -57,34 +56,50 @@ st.markdown("""
 def calcular_estatus_solucion(row, fecha_limite, fecha_inicio_mes):
     inicio = row['INICIO']
     fin = row['FIN']
-    
     dias_totales_excel = row['DIAS'] if pd.notnull(row['DIAS']) else 0
     txt = str(row['RANGO']).lower()
     
-    # 1. ¿Estaba abierto al cierre del mes?
+    # 1. Lógica para tickets que siguen abiertos al corte
     sigue_abierto_al_corte = pd.isna(fin) or (fin > fecha_limite)
-
     if sigue_abierto_al_corte:
         if pd.notnull(inicio):
             dias_al_momento = (fecha_limite - inicio).days
-        else:
-            dias_al_momento = 0
-        
-        if dias_al_momento > 7:
-            if pd.notnull(inicio) and (inicio >= fecha_inicio_mes):
+            if dias_al_momento <= 7:
+                return "Dentro"
+            elif inicio >= fecha_inicio_mes:
                 return "Acumulado"
-            else:
-                return "IGNORAR" 
-        else:
-            return "Dentro"
+        return "IGNORAR"
 
-    else:
-        # TICKET CERRADO EN EL MES
-        es_fuera_rango = any(x in txt for x in ['fuera', 'asap', 'programado'])
-        if dias_totales_excel > 7 or es_fuera_rango:
-            return "Fuera"
-        else:
-            return "Dentro"
+    # 2. Lógica para tickets cerrados (Jerarquía de Prioridad)
+    # PRIORIDAD 1: Si fue en 7 días o menos, es DENTRO
+    if dias_totales_excel <= 7:
+        return "Dentro"
+    
+    # PRIORIDAD 2: Si tardó más pero es Asap
+    if 'asap' in txt:
+        return "Fuera" # Se clasifica como Fuera para el Sunburst, pero el detalle dirá Asap
+    
+    # PRIORIDAD 3: Si tardó más pero es Programado
+    if 'program' in txt:
+        return "Fuera" # El detalle dirá Programado
+        
+    # PRIORIDAD 4: Todo lo demás que tarde > 7 días
+    return "Fuera"
+
+def calcular_detalle_solucion(row):
+    # Esta función define la "etiqueta" final que aparecerá en el gráfico
+    estatus_padre = row['Estatus_Solucion']
+    txt = str(row['RANGO']).lower()
+    
+    if estatus_padre == 'Dentro':
+        return 'Dentro'
+    
+    if estatus_padre == 'Fuera':
+        if 'asap' in txt: return 'Asap'
+        if 'program' in txt: return 'Programado'
+        return 'Fuera' # Fuera real por tiempo
+        
+    return np.nan
 
 def calcular_detalle_solucion(row):
     padre = row['Estatus_Solucion']
@@ -444,5 +459,3 @@ if df is not None:
 
 else:
     st.error("No se encontró 'Tickets año.xlsx'")
-
-
