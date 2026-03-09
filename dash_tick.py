@@ -90,7 +90,7 @@ st.title("📊 Dashboard de Gestión IT")
 st.subheader("Distribución: Soporte vs. Programados")
 fig_pie = px.pie(df_filtrado, names='TIPO', hole=0.4,
                  color='TIPO',
-                 color_discrete_map={'Servicio de Soporte': '#E74C3C', 'Actividad Programada': '#3498DB'})
+                 color_discrete_map={'Servicio de Soporte': '#8E44AD', 'Actividad Programada': '#3498DB'})
 st.plotly_chart(fig_pie, use_container_width=True)
 
 st.divider()
@@ -105,7 +105,7 @@ with col_izq:
         fig_sop = px.bar(df_soporte['CATEGORIA'].value_counts().reset_index(),
                         x='count', y='CATEGORIA', orientation='h',
                         color='count', 
-                        color_continuous_scale='Reds',
+                        color_continuous_scale='Purples', # Cambiado a morado
                         labels={'count':'Tickets', 'CATEGORIA':''})
         st.plotly_chart(fig_sop, use_container_width=True)
     else:
