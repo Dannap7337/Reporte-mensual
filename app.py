@@ -156,7 +156,7 @@ if df is not None:
             df_f, _, _ = get_data_mensual(df, selected_year, selected_month_num)
 
             st.title(f"📊 {pagina}")
-            st.caption(f"Datos de {selected_month_name} {selected_year} (Días hábiles)")
+            st.caption(f"Datos de {selected_month_name} {selected_year}")
 
             # --- PÁGINA 1: GENERACIÓN (ESTILO ORIGINAL RESTAURADO) ---
             if pagina == "1. Generación":
