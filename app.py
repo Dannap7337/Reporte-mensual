@@ -67,7 +67,7 @@ def calcular_estatus_solucion(row, fecha_limite, fecha_inicio_mes):
 
 def calcular_detalle_solucion(row):
     if row['Estatus_Solucion'] == 'Fuera':
-        gen_val = str(row['Generación_Excel']).strip().lower()
+        gen_val = str(row['Generacion_Excel']).strip().lower()
         if 'mismo' in gen_val:
             return 'Asap'
         txt = str(row['RANGO']).lower()
