@@ -180,7 +180,7 @@ if df is not None:
                 d.columns=['E','C']
                 fig = px.pie(d, values='C', names='E', hole=0.5, color='E', color_discrete_map={'A tiempo': '#4472C4', 'Mismo día': '#ED7D31', 'Fuera': '#FFC000', 'Programados': '#A5A5A5'})
                 fig.update_layout(height=600, font=dict(size=20))
-                st.plotly_chart(fig, width='stretch')
+                st.plotly_chart(fig, use_container_width=True)
                 with st.expander("Ver Detalle"): st.dataframe(df_f[['N° TICKET', 'USUARIO', 'INICIO', 'Generacion_Excel']].style.apply(estilo_generacion, axis=1))
 
             elif pagina == "2. Solución":
@@ -199,7 +199,7 @@ if df is not None:
                 
                 fig = go.Figure(go.Sunburst(ids=ids, labels=labels, parents=parents, values=values, branchvalues="total", marker=dict(colors=colors, line=dict(color='#ffffff', width=2)), textinfo="label+value+percent root"))
                 fig.update_layout(height=800, font=dict(size=18))
-                st.plotly_chart(fig, width='stretch')
+                st.plotly_chart(fig, use_container_width=True)
                 with st.expander("Ver Detalle"): st.dataframe(df_f[['N° TICKET', 'USUARIO', 'INICIO', 'FIN', 'DIAS', 'RANGO', 'Estatus_Solucion', 'Detalle_Solucion']].style.apply(estilo_solucion, axis=1))
 
             elif pagina == "3. Contacto":
@@ -208,7 +208,7 @@ if df is not None:
                     d.columns=['E','C']
                     fig = px.pie(d, values='C', names='E', hole=0.5, color='E', color_discrete_map={'A tiempo':'#4472C4', 'Fuera':'#ed7d31'})
                     fig.update_layout(height=600, font=dict(size=20))
-                    st.plotly_chart(fig, width='stretch')
+                    st.plotly_chart(fig, use_container_width=True)
                     with st.expander("Ver Detalle"): st.dataframe(df_f[['N° TICKET', 'USUARIO', 'INICIO', 'DIAS PRIMER CONTACTO', 'Estatus_Contacto']].style.apply(estilo_contacto, axis=1))
 
     # PÁGINA 4: RESUMEN ANUAL
@@ -224,14 +224,18 @@ if df is not None:
             df_anual['Cumple'] = df_anual['DIAS'].apply(lambda x: 1 if x <= 7 else 0)
             tendencia = df_anual.groupby(df_anual['FIN'].dt.month)['Cumple'].mean() * 100
             fig_line = px.line(x=[meses_map[m] for m in tendencia.index], y=tendencia.values, markers=True)
-            st.plotly_chart(fig_line, width='stretch')
+            st.plotly_chart(fig_line, use_container_width=True)
 
-    # PÁGINA 5: ESCALADOS
+    # PÁGINA 5: ESCALADOS (ACTUALIZADA: HISTÓRICO COMPLETO + TABLA)
     elif pagina == "5. Escalados":
-        st.title("🚀 Reporte de Tickets Escalados")
+        st.title("🚀 Reporte de Tickets Escalados (Histórico)")
         df_esc = load_escalados()
+        
         if df_esc is not None and 'dias_transcurridos' in df_esc.columns:
+            # Identificar columna motivo
             col_mot = next((c for c in df_esc.columns if c.lower() == 'motivo'), 'Motivo')
+            
+            # --- SECCIÓN GRÁFICOS ---
             c1, c2 = st.columns(2)
             
             with c1:
@@ -239,7 +243,7 @@ if df is not None:
                 df_f = df_esc[df_esc['dias_transcurridos'] > 7]
                 if not df_f.empty:
                     fig1 = px.pie(df_f, names=col_mot, hole=0.4, color_discrete_sequence=px.colors.qualitative.Set2)
-                    st.plotly_chart(fig1, width='stretch')
+                    st.plotly_chart(fig1, use_container_width=True)
                 else: st.success("Sin tickets pendientes mayores a 7 días.")
 
             with c2:
@@ -247,8 +251,25 @@ if df is not None:
                 df_d = df_esc[df_esc['dias_transcurridos'] <= 7]
                 if not df_d.empty:
                     fig2 = px.pie(df_d, names=col_mot, hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
-                    st.plotly_chart(fig2, width='stretch')
+                    st.plotly_chart(fig2, use_container_width=True)
                 else: st.info("Sin tickets escalados recientes.")
+            
+            # --- SECCIÓN TABLA DETALLE ---
+            st.markdown("---")
+            st.subheader("📋 Detalle de Tickets Escalados")
+            
+            # Estilo para la tabla de escalados
+            def estilo_fila_escalados(row):
+                color = '#f8d7da' if row['dias_transcurridos'] > 7 else '#d4edda'
+                return [f'background-color: {color}; color: black'] * len(row)
+            
+            # Ordenar para que los más antiguos/urgentes salgan arriba
+            df_esc_sort = df_esc.sort_values(by='dias_transcurridos', ascending=False)
+            
+            st.dataframe(
+                df_esc_sort.style.apply(estilo_fila_escalados, axis=1),
+                use_container_width=True
+            )
         else:
             st.error("No se encontró 'Datos escalados.xlsx' o falta la columna 'inicio'.")
 else:
