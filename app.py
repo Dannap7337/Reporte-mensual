@@ -15,14 +15,6 @@ FERIADOS = [
 ]
 feriados_np = np.array(FERIADOS, dtype='datetime64[D]')
 
-# --- CSS ---
-st.markdown("""
-    <style>
-    div.stButton > button:first-child { background-color: #28a745; color: white; border: none; font-weight: bold; }
-    [data-testid="stMetricValue"] { font-size: 26px; }
-    </style>
-""", unsafe_allow_html=True)
-
 # --- FUNCIONES DE LÓGICA ---
 def contar_dias_habiles(inicio, fin):
     try:
@@ -50,16 +42,28 @@ def load_escalados():
     if os.path.exists("Datos escalados.xlsx"):
         try:
             df = pd.read_excel("Datos escalados.xlsx")
+            # Normalizar nombres de columnas: quitar espacios y pasar a MAYÚSCULAS para comparar mejor
             df.columns = df.columns.str.strip()
-            if 'inicio' in df.columns:
-                df['inicio'] = pd.to_datetime(df['inicio'], dayfirst=True, errors='coerce')
+            
+            # Buscar la columna de fecha sin importar si es 'inicio', 'Inicio' o 'INICIO'
+            col_fecha = next((c for c in df.columns if c.upper() == 'INICIO'), None)
+            
+            if col_fecha:
+                df[col_fecha] = pd.to_datetime(df[col_fecha], dayfirst=True, errors='coerce')
                 hoy = pd.Timestamp.now()
-                df['dias_transcurridos'] = df['inicio'].apply(lambda x: contar_dias_habiles(x, hoy))
+                # Creamos la columna asegurándonos de que exista
+                df['dias_transcurridos'] = df[col_fecha].apply(lambda x: contar_dias_habiles(x, hoy))
+            else:
+                # Si no encuentra la columna, creamos la de días en 0 para evitar que el app explote
+                df['dias_transcurridos'] = 0
+                st.sidebar.error("⚠️ No se encontró la columna 'inicio' en el Excel de Escalados.")
             return df
-        except: return None
+        except Exception as e:
+            st.sidebar.error(f"Error cargando escalados: {e}")
+            return None
     return None
 
-# --- SIDEBAR (Siempre se ejecuta primero para evitar NameError) ---
+# --- SIDEBAR ---
 st.sidebar.title("Menú Principal")
 pagina = st.sidebar.radio("Selecciona:", ["1. Generación", "2. Solución", "3. Contacto", "4. Resumen Anual"])
 selected_year = st.sidebar.selectbox("Año", [2025, 2026], index=1)
@@ -69,14 +73,12 @@ df = load_data()
 df_esc = load_escalados()
 
 if df is not None:
-    # Lógica de fechas
-    ahora = pd.Timestamp.now()
     meses_map = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
 
     if pagina == "4. Resumen Anual":
         st.title(f"📈 Resumen Anual {selected_year}")
         
-        # Filtrar datos del año para eficiencia
+        # Lógica de eficiencia anual
         df['DIAS'] = df.apply(lambda x: contar_dias_habiles(x['INICIO'], x['FIN']) if pd.notnull(x['FIN']) else np.nan, axis=1)
         df_anual = df[df['FIN'].dt.year == selected_year].copy()
         
@@ -85,13 +87,14 @@ if df is not None:
             tendencia = df_anual.groupby(df_anual['FIN'].dt.month)['Cumple'].mean() * 100
             
             fig_line = px.line(x=[meses_map[m] for m in tendencia.index], y=tendencia.values, markers=True, title="Eficiencia Mensual")
-            st.plotly_chart(fig_line, use_container_width=True)
+            # Actualizado: width='stretch' reemplaza use_container_width=True
+            st.plotly_chart(fig_line, width='stretch')
         
         # --- SECCIÓN ESCALADOS ---
         st.markdown("---")
-        st.header("🚀 Tickets Escalados (Datos Actuales)")
+        st.header("🚀 Tickets Escalados (Estatus Actual)")
         
-        if df_esc is not None:
+        if df_esc is not None and 'dias_transcurridos' in df_esc.columns:
             col1, col2 = st.columns(2)
             
             # Gráfico 1: > 7 días
@@ -99,9 +102,11 @@ if df is not None:
             with col1:
                 st.subheader("⚠️ Más de 7 días hábiles")
                 if not df_fuera.empty:
-                    fig1 = px.pie(df_fuera, names='Motivo', hole=0.4, 
+                    # Buscamos la columna de Motivo ignorando mayúsculas
+                    col_motivo = next((c for c in df_esc.columns if c.upper() == 'MOTIVO'), 'Motivo')
+                    fig1 = px.pie(df_fuera, names=col_motivo, hole=0.4, 
                                  color_discrete_sequence=px.colors.qualitative.Reds_r)
-                    st.plotly_chart(fig1, use_container_width=True)
+                    st.plotly_chart(fig1, width='stretch')
                 else:
                     st.info("No hay tickets escalados con más de 7 días.")
 
@@ -110,21 +115,18 @@ if df is not None:
             with col2:
                 st.subheader("✅ 7 días hábiles o menos")
                 if not df_dentro.empty:
-                    fig2 = px.pie(df_dentro, names='Motivo', hole=0.4,
+                    col_motivo = next((c for c in df_esc.columns if c.upper() == 'MOTIVO'), 'Motivo')
+                    fig2 = px.pie(df_dentro, names=col_motivo, hole=0.4,
                                  color_discrete_sequence=px.colors.qualitative.Blues_r)
-                    st.plotly_chart(fig2, use_container_width=True)
+                    st.plotly_chart(fig2, width='stretch')
                 else:
                     st.info("No hay tickets escalados recientes.")
-            
-            with st.expander("Ver lista de tickets escalados"):
-                st.table(df_esc[['Ticket', 'Usuario', 'Motivo', 'inicio', 'dias_transcurridos']])
         else:
-            st.warning("No se pudo cargar 'Datos escalados.xlsx'. Verifica que el archivo exista.")
+            st.warning("No hay datos de escalados disponibles.")
 
     else:
         st.title(f"📊 {pagina}")
-        st.info("Selecciona 'Resumen Anual' para ver los nuevos gráficos de escalados.")
-        # Aquí iría el resto de tu código para las páginas 1, 2 y 3...
+        st.info("La sección de escalados se encuentra en '4. Resumen Anual'.")
 
 else:
-    st.error("Error: No se encontró el archivo principal 'Tickets año.xlsx'.")
+    st.error("No se encontró el archivo principal de tickets.")
