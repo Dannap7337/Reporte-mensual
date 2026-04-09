@@ -228,7 +228,7 @@ if df is not None:
 
     # PÁGINA 5: ESCALADOS (ACTUALIZADA: HISTÓRICO COMPLETO + TABLA)
     elif pagina == "5. Escalados":
-        st.title("🚀 Reporte de Tickets Escalados (Histórico)")
+        st.title("Reporte de Tickets Escalados (Histórico)")
         df_esc = load_escalados()
         
         if df_esc is not None and 'dias_transcurridos' in df_esc.columns:
