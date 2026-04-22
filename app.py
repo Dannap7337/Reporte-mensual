@@ -15,12 +15,35 @@ FERIADOS = [
 ]
 feriados_np = np.array(FERIADOS, dtype='datetime64[D]')
 
+# --- CONFIGURACIÓN DE ENLACES DE LÍNEAS DE TIEMPO ---
+LINKS_TIMELINE = {
+    (2025, 8): "https://lucid.app/lucidspark/543f6a91-1a33-4c3b-a36a-c1aa7ed7e063/edit?invitationId=inv_cc6d1591-c99a-4b82-b334-9898dbadd8b8",
+    (2025, 9): "https://lucid.app/lucidspark/b6d966fe-81c8-4c80-b434-8b887b9f478c/edit?invitationId=inv_0789d6c9-c78c-43fa-b137-445bee6dd70c",
+    (2025, 10): "https://lucid.app/lucidspark/fa0b5127-cb34-48b6-ab4d-760d38ac95d5/edit?invitationId=inv_f9d4919f-3afb-4862-8abd-a3fa7e90c52a",
+    (2025, 11): "https://lucid.app/lucidspark/487992bf-7d7d-4eab-a389-6ccfae58c557/edit?invitationId=inv_25f6128c-a3ec-4f65-a58f-21be6ac896c6",
+    (2025, 12): "https://lucid.app/lucidspark/fd3b8c79-5408-495f-b2ac-f1a58b043db7/edit?invitationId=inv_54a83472-e357-462a-9493-7172fe0b7757",
+    (2026, 1): "https://lucid.app/lucidspark/7f65f049-6242-485e-ac78-31abe3bc87f3/edit?invitationId=inv_5568d403-e21a-4692-a3c7-70582e9cb58f",
+    (2026, 2): "https://lucid.app/lucidspark/81cc3721-e383-4dad-a64f-25644745f3f6/edit?viewport_loc=728%2C-8296%2C11633%2C5008%2C0_0&invitationId=inv_e1b9573f-c69d-48dd-8bf7-f178d663d77e"
+}
+
+# --- CSS ---
+st.markdown("""
+    <style>
+    [data-testid="stMetricValue"] { font-size: 26px; }
+    .timeline-link {
+        font-size: 16px; font-weight: bold; color: #4472C4 !important; text-decoration: none;
+        padding: 10px 20px; border: 2px solid #4472C4; border-radius: 8px; display: inline-block;
+        margin-top: 15px; transition: all 0.3s ease; text-align: center;
+    }
+    .timeline-link:hover { background-color: #4472C4; color: white !important; }
+    </style>
+""", unsafe_allow_html=True)
+
 # --- FUNCIONES DE LÓGICA ---
 def contar_dias_habiles(inicio, fin):
     try:
         if pd.isna(inicio) or pd.isna(fin): return 0
-        start = np.datetime64(inicio, 'D')
-        end = np.datetime64(fin, 'D')
+        start = np.datetime64(inicio, 'D'); end = np.datetime64(fin, 'D')
         if start > end: return 0
         return int(np.busday_count(start, end, holidays=feriados_np))
     except: return 0
@@ -47,10 +70,7 @@ def calcular_detalle_solucion(row):
         return 'Fuera.'
     return np.nan 
 
-def calcular_contacto(dias):
-    return "Fuera" if (pd.notnull(dias) and dias > 3) else "A tiempo"
-
-# --- FUNCIONES DE ESTILO (COLORES SUAVIZADOS 0.3) ---
+# --- FUNCIONES DE ESTILO (0.3 OPACIDAD) ---
 def hex_to_rgba(hex_code, opacity=0.3):
     hex_code = hex_code.lstrip('#')
     r, g, b = int(hex_code[0:2], 16), int(hex_code[2:4], 16), int(hex_code[4:6], 16)
@@ -66,47 +86,35 @@ def estilo_solucion(row):
     color_hex = '#4472C4' if estatus == 'Dentro' else ('#FFC000' if estatus == 'Acumulado' else ('#A5A5A5' if 'Asap' in detalle else ('#70AD47' if 'Programado' in detalle else '#ED7D31')))
     return [f'background-color: {hex_to_rgba(color_hex)}; color: black'] * len(row)
 
-def estilo_contacto(row):
-    color_hex = '#4472C4' if row['Estatus_Contacto'] == 'A tiempo' else '#ED7D31'
-    return [f'background-color: {hex_to_rgba(color_hex)}; color: black'] * len(row)
-
 def estilo_escalados_suave(row):
-    # Rojo suave para > 7, Verde suave para <= 7
     color_hex = '#DC3545' if row['dias_transcurridos'] > 7 else '#28A745'
     return [f'background-color: {hex_to_rgba(color_hex)}; color: black'] * len(row)
 
 # --- CARGA DE DATOS ---
 @st.cache_data(ttl=300) 
 def load_data():
-    posibles = ["Tickets año.xlsx", "Tickets año.xls", "Tickets año.csv"]
-    archivo_encontrado = next((f for f in posibles if os.path.exists(f)), None)
-    if archivo_encontrado:
-        try: 
-            df = pd.read_excel(archivo_encontrado) if 'xls' in archivo_encontrado else pd.read_csv(archivo_encontrado)
+    for f in ["Tickets año.xlsx", "Tickets año.xls", "Tickets año.csv"]:
+        if os.path.exists(f):
+            df = pd.read_excel(f) if 'xls' in f else pd.read_csv(f)
             df.columns = df.columns.str.strip()
-            for c in ['INICIO', 'FIN', 'CORREO']:
+            for c in ['INICIO', 'FIN']:
                 if c in df.columns: df[c] = pd.to_datetime(df[c], dayfirst=True, errors='coerce')
-            if 'INICIO' in df.columns and 'FIN' in df.columns:
-                df['DIAS'] = df.apply(lambda x: contar_dias_habiles(x['INICIO'], x['FIN']) if pd.notnull(x['FIN']) else np.nan, axis=1)
-            col_gen_real = next((col for col in df.columns if "GENERACI" in col.upper() and "TICKET" in col.upper()), None)
-            df.rename(columns={col_gen_real: 'Generacion_Excel'} if col_gen_real else {}, inplace=True)
+            df['DIAS'] = df.apply(lambda x: contar_dias_habiles(x['INICIO'], x['FIN']) if pd.notnull(x['FIN']) else np.nan, axis=1)
+            col_gen = next((col for col in df.columns if "GENERACI" in col.upper()), 'Generacion_Excel')
+            df.rename(columns={col_gen: 'Generacion_Excel'}, inplace=True)
             return df
-        except: return None
     return None
 
 @st.cache_data(ttl=300)
 def load_escalados():
     if os.path.exists("Datos escalados.xlsx"):
-        try:
-            df = pd.read_excel("Datos escalados.xlsx")
-            df.columns = [str(c).strip() for c in df.columns]
-            col_ini = next((c for c in df.columns if c.lower() == 'inicio'), None)
-            if col_ini:
-                df[col_ini] = pd.to_datetime(df[col_ini], dayfirst=True, errors='coerce')
-                hoy = pd.Timestamp.now()
-                df['dias_transcurridos'] = df[col_ini].apply(lambda x: contar_dias_habiles(x, hoy))
-            return df
-        except: return None
+        df = pd.read_excel("Datos escalados.xlsx")
+        df.columns = [str(c).strip() for c in df.columns]
+        col_ini = next((c for c in df.columns if c.lower() == 'inicio'), None)
+        if col_ini:
+            df[col_ini] = pd.to_datetime(df[col_ini], dayfirst=True, errors='coerce')
+            df['dias_transcurridos'] = df[col_ini].apply(lambda x: contar_dias_habiles(x, pd.Timestamp.now()))
+        return df
     return None
 
 # --- SIDEBAR ---
@@ -121,14 +129,15 @@ if df is not None:
     meses_map = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
     
     if pagina in ["1. Generación", "2. Solución", "3. Contacto"]:
-        # Filtro: meses estrictamente cerrados (Anterior al mes actual)
-        meses_validos = list(range(1, ahora.month)) if selected_year == ahora.year else list(range(1, 13))
+        # Filtro: Solo meses cerrados (Marzo 2026 es el último si hoy es Abril)
+        limite_mes = ahora.month if selected_year == ahora.year else 13
+        meses_disp_nums = [m for m in range(1, limite_mes)]
         
-        if not meses_validos:
+        if not meses_disp_nums:
             st.info(f"Sin meses cerrados para {selected_year}.")
         else:
-            meses_disp = [meses_map[m] for m in meses_validos]
-            selected_month_name = st.sidebar.selectbox("Mes", meses_disp, index=len(meses_disp)-1)
+            meses_disp_names = [meses_map[m] for m in meses_disp_nums]
+            selected_month_name = st.sidebar.selectbox("Mes", meses_disp_names, index=len(meses_disp_names)-1)
             selected_month_num = next(k for k,v in meses_map.items() if v==selected_month_name)
             
             inicio_mes = pd.Timestamp(selected_year, selected_month_num, 1)
@@ -139,85 +148,63 @@ if df is not None:
             df_f = df_f[df_f['Estatus_Solucion'] != 'IGNORAR']
             df_f['Detalle_Solucion'] = df_f.apply(calcular_detalle_solucion, axis=1)
 
-            st.title(f"📊 {pagina} - {selected_month_name}")
+            st.title(f"📊 {pagina} - {selected_month_name} {selected_year}")
 
             if pagina == "2. Solución":
-                conteo_padres = df_f['Estatus_Solucion'].value_counts()
-                df_fuera = df_f[df_f['Estatus_Solucion'] == 'Fuera']
+                conteo = df_f['Estatus_Solucion'].value_counts()
                 ids, labels, parents, values, colors = [], [], [], [], []
-                
-                c_dentro, c_acumulado, c_fuera = '#4472C4', '#FFC000', '#ED7D31'
-                c_asap, c_prog = '#A5A5A5', '#70AD47'
+                c_map = {'Dentro': '#4472C4', 'Acumulado': '#FFC000', 'Fuera': '#ED7D31', 'Asap': '#A5A5A5', 'Programado': '#70AD47'}
 
-                if 'Dentro' in conteo_padres:
-                    ids.append("Dentro"); labels.append("Dentro"); parents.append(""); values.append(conteo_padres['Dentro']); colors.append(c_dentro)
-                if 'Acumulado' in conteo_padres:
-                    ids.append("Acumulado"); labels.append("Acumulado"); parents.append(""); values.append(conteo_padres['Acumulado']); colors.append(c_acumulado)
-                if not df_fuera.empty:
-                    ids.append("Fuera"); labels.append("Fuera"); parents.append(""); values.append(len(df_fuera)); colors.append(c_fuera)
-                    for subtipo, cant in df_fuera['Detalle_Solucion'].value_counts().items():
-                        ids.append(f"Fuera - {subtipo}"); labels.append(subtipo); parents.append("Fuera"); values.append(cant)
-                        colors.append(c_asap if 'Asap' in str(subtipo) else (c_prog if 'Programado' in str(subtipo) else c_fuera))
+                for n in ['Dentro', 'Acumulado', 'Fuera']:
+                    if n in conteo:
+                        ids.append(n); labels.append(n); parents.append(""); values.append(conteo[n]); colors.append(c_map[n])
                 
-                fig = go.Figure(go.Sunburst(
-                    ids=ids, labels=labels, parents=parents, values=values, branchvalues="total",
-                    marker=dict(colors=colors, line=dict(color='#ffffff', width=2)), 
-                    leaf=dict(opacity=1),
-                    textinfo="label+value+percent entry" # MUESTRA PORCENTAJE EN SUNBURST
-                ))
-                fig.update_layout(height=700)
+                df_fuera = df_f[df_f['Estatus_Solucion'] == 'Fuera']
+                for subtipo, cant in df_fuera['Detalle_Solucion'].value_counts().items():
+                    ids.append(f"F_{subtipo}"); labels.append(subtipo); parents.append("Fuera"); values.append(cant)
+                    colors.append(c_map['Programado'] if 'Programado' in str(subtipo) else c_map['Asap'])
+                
+                fig = go.Figure(go.Sunburst(ids=ids, labels=labels, parents=parents, values=values, branchvalues="total",
+                    marker=dict(colors=colors, line=dict(color='#ffffff', width=2)), leaf=dict(opacity=1),
+                    textinfo="label+value+percent entry"))
                 st.plotly_chart(fig, use_container_width=True)
-                with st.expander("Ver Detalle"): st.dataframe(df_f.style.apply(estilo_solucion, axis=1), use_container_width=True)
 
             elif pagina == "1. Generación":
                 d = df_f['Generacion_Excel'].value_counts().reset_index()
-                d.columns=['E','C']
-                fig = px.pie(d, values='C', names='E', hole=0.5, color='E', color_discrete_map={'A tiempo': '#4472C4', 'Mismo día': '#ED7D31', 'Fuera': '#FFC000', 'Programados': '#A5A5A5'})
+                fig = px.pie(d, values='count', names='Generacion_Excel', hole=0.5, color='Generacion_Excel', 
+                             color_discrete_map={'A tiempo': '#4472C4', 'Mismo día': '#ED7D31', 'Fuera': '#FFC000'})
                 st.plotly_chart(fig, use_container_width=True)
-                with st.expander("Ver Detalle"): st.dataframe(df_f.style.apply(estilo_generacion, axis=1), use_container_width=True)
+
+            # --- BOTÓN LÍNEA DE TIEMPO (LUCID) ---
+            link = LINKS_TIMELINE.get((selected_year, selected_month_num))
+            if link:
+                st.markdown(f'<a href="{link}" target="_blank" class="timeline-link">🔗 Ver Línea de Tiempo - {selected_month_name}</a>', unsafe_allow_html=True)
+
+            with st.expander("Ver Detalle de Tabla"):
+                st.dataframe(df_f.style.apply(estilo_solucion if pagina=="2. Solución" else estilo_generacion, axis=1), use_container_width=True)
 
     elif pagina == "5. Escalados":
         st.title("🚀 Reporte de Tickets Escalados (Histórico)")
         df_esc = load_escalados()
         if df_esc is not None:
             col_mot = next((c for c in df_esc.columns if c.lower() == 'motivo'), 'Motivo')
-            
             categorias = df_esc[col_mot].unique()
-            color_map = {cat: px.colors.qualitative.Prism[i % len(px.colors.qualitative.Prism)] for i, cat in enumerate(categorias)}
-
-            df_f_esc = df_esc[df_esc['dias_transcurridos'] > 7]
-            df_d_esc = df_esc[df_esc['dias_transcurridos'] <= 7]
+            color_map = {cat: px.colors.qualitative.Prism[i % 11] for i, cat in enumerate(categorias)}
 
             c1, c2 = st.columns(2)
             with c1:
-                st.subheader("⚠️ Fuera de Tiempo (> 7 días)")
+                df_f_esc = df_esc[df_esc['dias_transcurridos'] > 7]
                 if not df_f_esc.empty:
-                    fig1 = px.pie(df_f_esc, names=col_mot, hole=0.4, color=col_mot, color_discrete_map=color_map)
+                    fig1 = px.pie(df_f_esc, names=col_mot, hole=0.4, title="Fuera de Tiempo (> 7 días)", color=col_mot, color_discrete_map=color_map)
                     st.plotly_chart(fig1, use_container_width=True)
-
             with c2:
-                st.subheader("✅ En Tiempo (≤ 7 días)")
+                df_d_esc = df_esc[df_esc['dias_transcurridos'] <= 7]
                 if not df_d_esc.empty:
-                    fig2 = px.pie(df_d_esc, names=col_mot, hole=0.4, color=col_mot, color_discrete_map=color_map)
+                    fig2 = px.pie(df_d_esc, names=col_mot, hole=0.4, title="En Tiempo (≤ 7 días)", color=col_mot, color_discrete_map=color_map)
                     st.plotly_chart(fig2, use_container_width=True)
             
             st.markdown("---")
-            st.subheader("📋 Detalle de Tickets Escalados")
-            df_esc_sort = df_esc.sort_values(by='dias_transcurridos', ascending=False)
-            # TABLA CON COLORES SUAVES
-            st.dataframe(df_esc_sort.style.apply(estilo_escalados_suave, axis=1), use_container_width=True)
-
-    elif pagina == "4. Resumen Anual":
-        st.title(f"📈 Resumen Anual {selected_year}")
-        df_anual = df[df['FIN'].dt.year == selected_year].copy()
-        if not df_anual.empty:
-            total = len(df_anual)
-            tiempo = len(df_anual[df_anual['DIAS'] <= 7])
-            st.metric("Eficiencia Anual", f"{(tiempo/total*100):.1f}%")
-            
-            df_anual['Cumple'] = df_anual['DIAS'].apply(lambda x: 1 if x <= 7 else 0)
-            tendencia = df_anual.groupby(df_anual['FIN'].dt.month)['Cumple'].mean() * 100
-            fig_line = px.line(x=[meses_map[m] for m in tendencia.index if m in meses_map], y=tendencia.values, markers=True)
-            st.plotly_chart(fig_line, use_container_width=True)
+            st.subheader("📋 Detalle General de Escalados")
+            st.dataframe(df_esc.sort_values(by='dias_transcurridos', ascending=False).style.apply(estilo_escalados_suave, axis=1), use_container_width=True)
 else:
-    st.error("No se encontró 'Tickets año.xlsx'")
+    st.error("Archivo 'Tickets año.xlsx' no encontrado.")
