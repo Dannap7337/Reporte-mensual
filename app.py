@@ -50,24 +50,30 @@ def calcular_detalle_solucion(row):
 def calcular_contacto(dias):
     return "Fuera" if (pd.notnull(dias) and dias > 3) else "A tiempo"
 
-# --- FUNCIONES DE ESTILO (COLORES SÓLIDOS 1.0) ---
+# --- FUNCIONES DE ESTILO (COLORES SUAVIZADOS 0.3) ---
+def hex_to_rgba(hex_code, opacity=0.3):
+    hex_code = hex_code.lstrip('#')
+    r, g, b = int(hex_code[0:2], 16), int(hex_code[2:4], 16), int(hex_code[4:6], 16)
+    return f'rgba({r}, {g}, {b}, {opacity})'
+
 def estilo_generacion(row):
     val = str(row['Generacion_Excel'])
     color_hex = '#4472C4' if 'A tiempo' in val else ('#ED7D31' if 'Mismo' in val else ('#FFC000' if 'Fuera' in val else '#A5A5A5'))
-    return [f'background-color: {color_hex}; color: white; font-weight: bold'] * len(row)
+    return [f'background-color: {hex_to_rgba(color_hex)}; color: black'] * len(row)
 
 def estilo_solucion(row):
     estatus, detalle = row['Estatus_Solucion'], str(row['Detalle_Solucion'])
     color_hex = '#4472C4' if estatus == 'Dentro' else ('#FFC000' if estatus == 'Acumulado' else ('#A5A5A5' if 'Asap' in detalle else ('#70AD47' if 'Programado' in detalle else '#ED7D31')))
-    return [f'background-color: {color_hex}; color: white; font-weight: bold'] * len(row)
+    return [f'background-color: {hex_to_rgba(color_hex)}; color: black'] * len(row)
 
 def estilo_contacto(row):
     color_hex = '#4472C4' if row['Estatus_Contacto'] == 'A tiempo' else '#ED7D31'
-    return [f'background-color: {color_hex}; color: white; font-weight: bold'] * len(row)
+    return [f'background-color: {hex_to_rgba(color_hex)}; color: black'] * len(row)
 
-def estilo_escalados_vivos(row):
-    color = '#DC3545' if row['dias_transcurridos'] > 7 else '#28A745'
-    return [f'background-color: {color}; color: white; font-weight: bold'] * len(row)
+def estilo_escalados_suave(row):
+    # Rojo suave para > 7, Verde suave para <= 7
+    color_hex = '#DC3545' if row['dias_transcurridos'] > 7 else '#28A745'
+    return [f'background-color: {hex_to_rgba(color_hex)}; color: black'] * len(row)
 
 # --- CARGA DE DATOS ---
 @st.cache_data(ttl=300) 
@@ -84,7 +90,6 @@ def load_data():
                 df['DIAS'] = df.apply(lambda x: contar_dias_habiles(x['INICIO'], x['FIN']) if pd.notnull(x['FIN']) else np.nan, axis=1)
             col_gen_real = next((col for col in df.columns if "GENERACI" in col.upper() and "TICKET" in col.upper()), None)
             df.rename(columns={col_gen_real: 'Generacion_Excel'} if col_gen_real else {}, inplace=True)
-            if 'Generacion_Excel' not in df.columns: df['Generacion_Excel'] = "No encontrado"
             return df
         except: return None
     return None
@@ -113,17 +118,12 @@ df = load_data()
 
 if df is not None:
     ahora = pd.Timestamp.now()
-    # Lógica de meses cerrados (Hoy es Abril 2026, mostrar hasta Marzo)
     meses_map = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
     
     if pagina in ["1. Generación", "2. Solución", "3. Contacto"]:
-        if selected_year == ahora.year:
-            meses_validos = list(range(1, ahora.month)) # 1 a 3 si es Abril
-        elif selected_year < ahora.year:
-            meses_validos = list(range(1, 13))
-        else:
-            meses_validos = []
-
+        # Filtro: meses estrictamente cerrados (Anterior al mes actual)
+        meses_validos = list(range(1, ahora.month)) if selected_year == ahora.year else list(range(1, 13))
+        
         if not meses_validos:
             st.info(f"Sin meses cerrados para {selected_year}.")
         else:
@@ -138,20 +138,10 @@ if df is not None:
             df_f['Estatus_Solucion'] = df_f.apply(lambda x: calcular_estatus_solucion(x, fin_mes, inicio_mes), axis=1)
             df_f = df_f[df_f['Estatus_Solucion'] != 'IGNORAR']
             df_f['Detalle_Solucion'] = df_f.apply(calcular_detalle_solucion, axis=1)
-            if 'DIAS PRIMER CONTACTO' in df_f.columns:
-                df_f['Estatus_Contacto'] = df_f['DIAS PRIMER CONTACTO'].apply(calcular_contacto)
 
             st.title(f"📊 {pagina} - {selected_month_name}")
 
-            if pagina == "1. Generación":
-                d = df_f['Generacion_Excel'].value_counts().reset_index()
-                d.columns=['E','C']
-                fig = px.pie(d, values='C', names='E', hole=0.5, color='E', color_discrete_map={'A tiempo': '#4472C4', 'Mismo día': '#ED7D31', 'Fuera': '#FFC000', 'Programados': '#A5A5A5'})
-                fig.update_traces(opacity=1)
-                st.plotly_chart(fig, use_container_width=True)
-                with st.expander("Ver Detalle"): st.dataframe(df_f.style.apply(estilo_generacion, axis=1), use_container_width=True)
-
-            elif pagina == "2. Solución":
+            if pagina == "2. Solución":
                 conteo_padres = df_f['Estatus_Solucion'].value_counts()
                 df_fuera = df_f[df_f['Estatus_Solucion'] == 'Fuera']
                 ids, labels, parents, values, colors = [], [], [], [], []
@@ -169,28 +159,29 @@ if df is not None:
                         ids.append(f"Fuera - {subtipo}"); labels.append(subtipo); parents.append("Fuera"); values.append(cant)
                         colors.append(c_asap if 'Asap' in str(subtipo) else (c_prog if 'Programado' in str(subtipo) else c_fuera))
                 
-                fig = go.Figure(go.Sunburst(ids=ids, labels=labels, parents=parents, values=values, branchvalues="total",
-                    marker=dict(colors=colors, line=dict(color='#ffffff', width=2)), leaf=dict(opacity=1)))
+                fig = go.Figure(go.Sunburst(
+                    ids=ids, labels=labels, parents=parents, values=values, branchvalues="total",
+                    marker=dict(colors=colors, line=dict(color='#ffffff', width=2)), 
+                    leaf=dict(opacity=1),
+                    textinfo="label+value+percent entry" # MUESTRA PORCENTAJE EN SUNBURST
+                ))
                 fig.update_layout(height=700)
                 st.plotly_chart(fig, use_container_width=True)
                 with st.expander("Ver Detalle"): st.dataframe(df_f.style.apply(estilo_solucion, axis=1), use_container_width=True)
 
-            elif pagina == "3. Contacto":
-                if 'Estatus_Contacto' in df_f.columns:
-                    d = df_f['Estatus_Contacto'].value_counts().reset_index()
-                    d.columns=['E','C']
-                    fig = px.pie(d, values='C', names='E', hole=0.5, color='E', color_discrete_map={'A tiempo':'#4472C4', 'Fuera':'#ed7d31'})
-                    fig.update_traces(opacity=1)
-                    st.plotly_chart(fig, use_container_width=True)
-                    with st.expander("Ver Detalle"): st.dataframe(df_f.style.apply(estilo_contacto, axis=1), use_container_width=True)
+            elif pagina == "1. Generación":
+                d = df_f['Generacion_Excel'].value_counts().reset_index()
+                d.columns=['E','C']
+                fig = px.pie(d, values='C', names='E', hole=0.5, color='E', color_discrete_map={'A tiempo': '#4472C4', 'Mismo día': '#ED7D31', 'Fuera': '#FFC000', 'Programados': '#A5A5A5'})
+                st.plotly_chart(fig, use_container_width=True)
+                with st.expander("Ver Detalle"): st.dataframe(df_f.style.apply(estilo_generacion, axis=1), use_container_width=True)
 
     elif pagina == "5. Escalados":
-        st.title("Reporte de Tickets Escalados")
+        st.title("🚀 Reporte de Tickets Escalados (Histórico)")
         df_esc = load_escalados()
         if df_esc is not None:
             col_mot = next((c for c in df_esc.columns if c.lower() == 'motivo'), 'Motivo')
             
-            # Mapa de colores consistente para los dos gráficos de Escalados
             categorias = df_esc[col_mot].unique()
             color_map = {cat: px.colors.qualitative.Prism[i % len(px.colors.qualitative.Prism)] for i, cat in enumerate(categorias)}
 
@@ -202,22 +193,19 @@ if df is not None:
                 st.subheader("⚠️ Fuera de Tiempo (> 7 días)")
                 if not df_f_esc.empty:
                     fig1 = px.pie(df_f_esc, names=col_mot, hole=0.4, color=col_mot, color_discrete_map=color_map)
-                    fig1.update_traces(opacity=1)
                     st.plotly_chart(fig1, use_container_width=True)
-                else: st.success("Sin tickets pendientes fuera de tiempo.")
 
             with c2:
                 st.subheader("✅ En Tiempo (≤ 7 días)")
                 if not df_d_esc.empty:
                     fig2 = px.pie(df_d_esc, names=col_mot, hole=0.4, color=col_mot, color_discrete_map=color_map)
-                    fig2.update_traces(opacity=1)
                     st.plotly_chart(fig2, use_container_width=True)
-                else: st.info("Sin tickets recientes.")
             
             st.markdown("---")
             st.subheader("📋 Detalle de Tickets Escalados")
             df_esc_sort = df_esc.sort_values(by='dias_transcurridos', ascending=False)
-            st.dataframe(df_esc_sort.style.apply(estilo_escalados_vivos, axis=1), use_container_width=True)
+            # TABLA CON COLORES SUAVES
+            st.dataframe(df_esc_sort.style.apply(estilo_escalados_suave, axis=1), use_container_width=True)
 
     elif pagina == "4. Resumen Anual":
         st.title(f"📈 Resumen Anual {selected_year}")
@@ -225,13 +213,11 @@ if df is not None:
         if not df_anual.empty:
             total = len(df_anual)
             tiempo = len(df_anual[df_anual['DIAS'] <= 7])
-            c1, c2 = st.columns(2)
-            c1.metric(f"Total Tickets {selected_year}", total)
-            c2.metric("Eficiencia Anual", f"{(tiempo/total*100):.1f}%")
+            st.metric("Eficiencia Anual", f"{(tiempo/total*100):.1f}%")
             
             df_anual['Cumple'] = df_anual['DIAS'].apply(lambda x: 1 if x <= 7 else 0)
             tendencia = df_anual.groupby(df_anual['FIN'].dt.month)['Cumple'].mean() * 100
-            fig_line = px.line(x=[meses_map[m] for m in tendencia.index], y=tendencia.values, markers=True)
+            fig_line = px.line(x=[meses_map[m] for m in tendencia.index if m in meses_map], y=tendencia.values, markers=True)
             st.plotly_chart(fig_line, use_container_width=True)
 else:
     st.error("No se encontró 'Tickets año.xlsx'")
