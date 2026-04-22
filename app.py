@@ -81,6 +81,10 @@ def estilo_solucion(row):
     color = '#4472C4' if est == 'Dentro' else ('#FFC000' if est == 'Acumulado' else ('#70AD47' if 'programado' in det else '#ED7D31'))
     return [f'background-color: {hex_to_rgba(color)}; color: black'] * len(row)
 
+def estilo_contacto(row):
+    color = '#4472C4' if row['Estatus_Contacto'] == 'A tiempo' else '#ED7D31'
+    return [f'background-color: {hex_to_rgba(color)}; color: black'] * len(row)
+
 # --- CARGA DE DATOS ---
 @st.cache_data(ttl=300) 
 def load_data():
@@ -119,7 +123,7 @@ if df is not None:
     ahora = pd.Timestamp.now()
     meses_map = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
     
-    # PÁGINAS MENSUALES (1, 2, 3)
+    # --- PÁGINAS MENSUALES ---
     if pagina in ["1. Generación", "2. Solución", "3. Contacto"]:
         limite = ahora.month if selected_year == ahora.year else 13
         meses_disp = [meses_map[m] for m in range(1, limite)]
@@ -135,16 +139,20 @@ if df is not None:
             df_f['Estatus_Solucion'] = df_f.apply(lambda x: calcular_estatus_solucion(x, fin_m, ini_m), axis=1)
             df_f = df_f[df_f['Estatus_Solucion'] != 'IGNORAR']
             df_f['Detalle_Solucion'] = df_f.apply(calcular_detalle_solucion, axis=1)
+            if 'DIAS PRIMER CONTACTO' in df_f.columns:
+                df_f['Estatus_Contacto'] = df_f['DIAS PRIMER CONTACTO'].apply(lambda x: "Fuera" if x > 3 else "A tiempo")
 
             st.title(f"📊 {pagina} - {sel_mes_nom} {selected_year}")
 
             if pagina == "1. Generación":
                 d = df_f['Generacion_Excel_Clean'].value_counts().reset_index()
-                name_map = {'a tiempo': 'A tiempo', 'mismo dia': 'Mismo día', 'programados': 'Programados', 'fuera': 'Programados'}
+                name_map = {'a tiempo': 'A tiempo', 'mismo dia': 'Mismo día', 'programados': 'Programados'}
                 d['Etiqueta'] = d['Generacion_Excel_Clean'].map(lambda x: name_map.get(x, 'Programados'))
                 fig = px.pie(d, values='count', names='Etiqueta', hole=0.5, color='Etiqueta',
                              color_discrete_map={'A tiempo': '#4472C4', 'Mismo día': '#A5A5A5', 'Programados': '#ED7D31'})
                 st.plotly_chart(fig, use_container_width=True)
+                with st.expander("Ver Detalle de Tabla"):
+                    st.dataframe(df_f.style.apply(estilo_generacion, axis=1), use_container_width=True)
 
             elif pagina == "2. Solución":
                 ids, labels, parents, values, colors = [], [], [], [], []
@@ -161,44 +169,39 @@ if df is not None:
                     marker=dict(colors=colors, line=dict(color='#ffffff', width=2)), leaf=dict(opacity=1), textinfo="label+value+percent entry"))
                 fig.update_layout(height=850)
                 st.plotly_chart(fig, use_container_width=True)
+                with st.expander("Ver Detalle de Tabla"):
+                    st.dataframe(df_f.style.apply(estilo_solucion, axis=1), use_container_width=True)
 
             elif pagina == "3. Contacto":
-                if 'DIAS PRIMER CONTACTO' in df_f.columns:
-                    df_f['Estatus_Contacto'] = df_f['DIAS PRIMER CONTACTO'].apply(lambda x: "Fuera" if x > 3 else "A tiempo")
+                if 'Estatus_Contacto' in df_f.columns:
                     d = df_f['Estatus_Contacto'].value_counts().reset_index()
                     fig = px.pie(d, values='count', names='Estatus_Contacto', hole=0.5, color='Estatus_Contacto', color_discrete_map={'A tiempo':'#4472C4', 'Fuera':'#ED7D31'})
                     st.plotly_chart(fig, use_container_width=True)
+                    with st.expander("Ver Detalle de Tabla"):
+                        st.dataframe(df_f.style.apply(estilo_contacto, axis=1), use_container_width=True)
 
             link = LINKS_TIMELINE.get((selected_year, sel_mes_num))
             if link: st.markdown(f'<center><a href="{link}" target="_blank" style="text-decoration:none; border:2px solid #4472C4; padding:10px; border-radius:8px; color:#4472C4; font-weight:bold;">🔗 Ver Línea de Tiempo</a></center>', unsafe_allow_html=True)
 
-    # PÁGINA 4: RESUMEN ANUAL
+    # --- RESUMEN ANUAL ---
     elif pagina == "4. Resumen Anual":
         st.title(f"📈 Resumen Anual {selected_year}")
         df_anual = df[df['FIN'].dt.year == selected_year].copy()
         if not df_anual.empty:
-            total = len(df_anual)
-            tiempo = len(df_anual[df_anual['DIAS'] <= 7])
+            total = len(df_anual); tiempo = len(df_anual[df_anual['DIAS'] <= 7])
             c1, c2 = st.columns(2)
             c1.metric(f"Total Tickets {selected_year}", total)
             c2.metric("Eficiencia Anual Promedio", f"{(tiempo/total*100):.1f}%")
-            
-            st.markdown("### 📈 Tendencia de Eficiencia (Cerrados en ≤ 7 días)")
             df_anual['Cumple'] = df_anual['DIAS'].apply(lambda x: 1 if x <= 7 else 0)
             tendencia = df_anual.groupby(df_anual['FIN'].dt.month)['Cumple'].mean() * 100
-            
-            fig_line = px.line(x=[meses_map[m] for m in tendencia.index if m in meses_map], y=tendencia.values, markers=True)
-            fig_line.update_layout(yaxis_title="% Eficiencia", xaxis_title="Mes", yaxis_range=[0, 105])
+            fig_line = px.line(x=[meses_map[m] for m in tendencia.index], y=tendencia.values, markers=True)
             st.plotly_chart(fig_line, use_container_width=True)
-            
-            with st.expander("Ver Datos Base del Año"):
+            with st.expander("Ver Todos los Tickets del Año"):
                 st.dataframe(df_anual.style.apply(estilo_solucion, axis=1), use_container_width=True)
-        else:
-            st.info(f"No hay tickets cerrados registrados para el año {selected_year}.")
 
-    # PÁGINA 5: ESCALADOS
+    # --- ESCALADOS ---
     elif pagina == "5. Escalados":
-        st.title("🚀 Escalados (Histórico)")
+        st.title("🚀 Escalados (Histórico Total)")
         df_esc = load_escalados()
         if df_esc is not None:
             c1, c2 = st.columns(2)
@@ -208,7 +211,8 @@ if df is not None:
             df_d_e = df_esc[df_esc['dias_transcurridos'] <= 7]
             with c1: st.plotly_chart(px.pie(df_f_e, names='Motivo', title="Fuera de Tiempo", color='Motivo', color_discrete_map=color_p), use_container_width=True)
             with c2: st.plotly_chart(px.pie(df_d_e, names='Motivo', title="En Tiempo", color='Motivo', color_discrete_map=color_p), use_container_width=True)
-            st.dataframe(df_esc.style.apply(lambda r: [f'background-color: {hex_to_rgba("#DC3545" if r.dias_transcurridos > 7 else "#28A745")}; color:black']*len(r), axis=1), use_container_width=True)
+            st.markdown("---")
+            st.dataframe(df_esc.sort_values(by='dias_transcurridos', ascending=False).style.apply(lambda r: [f'background-color: {hex_to_rgba("#DC3545" if r.dias_transcurridos > 7 else "#28A745")}; color:black']*len(r), axis=1), use_container_width=True)
 
 else:
     st.error("Error al cargar Tickets año.xlsx")
