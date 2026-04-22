@@ -70,6 +70,9 @@ def calcular_detalle_solucion(row):
         return 'Fuera.'
     return np.nan 
 
+def calcular_contacto(dias):
+    return "Fuera" if (pd.notnull(dias) and dias > 3) else "A tiempo"
+
 # --- FUNCIONES DE ESTILO (0.3 OPACIDAD) ---
 def hex_to_rgba(hex_code, opacity=0.3):
     hex_code = hex_code.lstrip('#')
@@ -83,7 +86,12 @@ def estilo_generacion(row):
 
 def estilo_solucion(row):
     estatus, detalle = row['Estatus_Solucion'], str(row['Detalle_Solucion'])
-    color_hex = '#4472C4' if estatus == 'Dentro' else ('#FFC000' if estatus == 'Acumulado' else ('#A5A5A5' if 'Asap' in detalle else ('#70AD47' if 'Programado' in detalle else '#ED7D31')))
+    # RESTAURADO: ASAP en Naranja (#ED7D31) / PROGRAMADO en Verde (#70AD47)
+    color_hex = '#4472C4' if estatus == 'Dentro' else ('#FFC000' if estatus == 'Acumulado' else ('#ED7D31' if 'Asap' in detalle else ('#70AD47' if 'Programado' in detalle else '#ED7D31')))
+    return [f'background-color: {hex_to_rgba(color_hex)}; color: black'] * len(row)
+
+def estilo_contacto(row):
+    color_hex = '#4472C4' if row['Estatus_Contacto'] == 'A tiempo' else '#ED7D31'
     return [f'background-color: {hex_to_rgba(color_hex)}; color: black'] * len(row)
 
 def estilo_escalados_suave(row):
@@ -97,11 +105,13 @@ def load_data():
         if os.path.exists(f):
             df = pd.read_excel(f) if 'xls' in f else pd.read_csv(f)
             df.columns = df.columns.str.strip()
-            for c in ['INICIO', 'FIN']:
+            for c in ['INICIO', 'FIN', 'CORREO']:
                 if c in df.columns: df[c] = pd.to_datetime(df[c], dayfirst=True, errors='coerce')
-            df['DIAS'] = df.apply(lambda x: contar_dias_habiles(x['INICIO'], x['FIN']) if pd.notnull(x['FIN']) else np.nan, axis=1)
-            col_gen = next((col for col in df.columns if "GENERACI" in col.upper()), 'Generacion_Excel')
-            df.rename(columns={col_gen: 'Generacion_Excel'}, inplace=True)
+            if 'INICIO' in df.columns and 'FIN' in df.columns:
+                df['DIAS'] = df.apply(lambda x: contar_dias_habiles(x['INICIO'], x['FIN']) if pd.notnull(x['FIN']) else np.nan, axis=1)
+            col_gen_real = next((col for col in df.columns if "GENERACI" in col.upper() and "TICKET" in col.upper()), None)
+            df.rename(columns={col_gen_real: 'Generacion_Excel'} if col_gen_real else {}, inplace=True)
+            if 'Generacion_Excel' not in df.columns: df['Generacion_Excel'] = "No encontrado"
             return df
     return None
 
@@ -129,7 +139,7 @@ if df is not None:
     meses_map = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
     
     if pagina in ["1. Generación", "2. Solución", "3. Contacto"]:
-        # Filtro: Solo meses cerrados (Marzo 2026 es el último si hoy es Abril)
+        # Filtro estricto: Solo meses cerrados (Marzo es el último si hoy es Abril)
         limite_mes = ahora.month if selected_year == ahora.year else 13
         meses_disp_nums = [m for m in range(1, limite_mes)]
         
@@ -147,13 +157,23 @@ if df is not None:
             df_f['Estatus_Solucion'] = df_f.apply(lambda x: calcular_estatus_solucion(x, fin_mes, inicio_mes), axis=1)
             df_f = df_f[df_f['Estatus_Solucion'] != 'IGNORAR']
             df_f['Detalle_Solucion'] = df_f.apply(calcular_detalle_solucion, axis=1)
+            if 'DIAS PRIMER CONTACTO' in df_f.columns:
+                df_f['Estatus_Contacto'] = df_f['DIAS PRIMER CONTACTO'].apply(calcular_contacto)
 
             st.title(f"📊 {pagina} - {selected_month_name} {selected_year}")
 
-            if pagina == "2. Solución":
+            if pagina == "1. Generación":
+                d = df_f['Generacion_Excel'].value_counts().reset_index()
+                fig = px.pie(d, values='count', names='Generacion_Excel', hole=0.5, color='Generacion_Excel', 
+                             color_discrete_map={'A tiempo': '#4472C4', 'Mismo día': '#ED7D31', 'Fuera': '#FFC000'})
+                st.plotly_chart(fig, use_container_width=True)
+                with st.expander("Ver Detalle"): st.dataframe(df_f.style.apply(estilo_generacion, axis=1), use_container_width=True)
+
+            elif pagina == "2. Solución":
                 conteo = df_f['Estatus_Solucion'].value_counts()
                 ids, labels, parents, values, colors = [], [], [], [], []
-                c_map = {'Dentro': '#4472C4', 'Acumulado': '#FFC000', 'Fuera': '#ED7D31', 'Asap': '#A5A5A5', 'Programado': '#70AD47'}
+                # RESTAURADO: ASAP en Naranja (#ED7D31)
+                c_map = {'Dentro': '#4472C4', 'Acumulado': '#FFC000', 'Fuera': '#ED7D31', 'Asap': '#ED7D31', 'Programado': '#70AD47'}
 
                 for n in ['Dentro', 'Acumulado', 'Fuera']:
                     if n in conteo:
@@ -168,20 +188,20 @@ if df is not None:
                     marker=dict(colors=colors, line=dict(color='#ffffff', width=2)), leaf=dict(opacity=1),
                     textinfo="label+value+percent entry"))
                 st.plotly_chart(fig, use_container_width=True)
+                with st.expander("Ver Detalle"): st.dataframe(df_f.style.apply(estilo_solucion, axis=1), use_container_width=True)
 
-            elif pagina == "1. Generación":
-                d = df_f['Generacion_Excel'].value_counts().reset_index()
-                fig = px.pie(d, values='count', names='Generacion_Excel', hole=0.5, color='Generacion_Excel', 
-                             color_discrete_map={'A tiempo': '#4472C4', 'Mismo día': '#ED7D31', 'Fuera': '#FFC000'})
-                st.plotly_chart(fig, use_container_width=True)
+            elif pagina == "3. Contacto":
+                if 'Estatus_Contacto' in df_f.columns:
+                    d = df_f['Estatus_Contacto'].value_counts().reset_index()
+                    fig = px.pie(d, values='count', names='Estatus_Contacto', hole=0.5, color='Estatus_Contacto',
+                                 color_discrete_map={'A tiempo':'#4472C4', 'Fuera':'#ED7D31'})
+                    st.plotly_chart(fig, use_container_width=True)
+                    with st.expander("Ver Detalle"): st.dataframe(df_f.style.apply(estilo_contacto, axis=1), use_container_width=True)
 
-            # --- BOTÓN LÍNEA DE TIEMPO (LUCID) ---
+            # Botón Lucid
             link = LINKS_TIMELINE.get((selected_year, selected_month_num))
             if link:
                 st.markdown(f'<a href="{link}" target="_blank" class="timeline-link">🔗 Ver Línea de Tiempo - {selected_month_name}</a>', unsafe_allow_html=True)
-
-            with st.expander("Ver Detalle de Tabla"):
-                st.dataframe(df_f.style.apply(estilo_solucion if pagina=="2. Solución" else estilo_generacion, axis=1), use_container_width=True)
 
     elif pagina == "5. Escalados":
         st.title("🚀 Reporte de Tickets Escalados (Histórico)")
@@ -190,7 +210,6 @@ if df is not None:
             col_mot = next((c for c in df_esc.columns if c.lower() == 'motivo'), 'Motivo')
             categorias = df_esc[col_mot].unique()
             color_map = {cat: px.colors.qualitative.Prism[i % 11] for i, cat in enumerate(categorias)}
-
             c1, c2 = st.columns(2)
             with c1:
                 df_f_esc = df_esc[df_esc['dias_transcurridos'] > 7]
@@ -202,9 +221,18 @@ if df is not None:
                 if not df_d_esc.empty:
                     fig2 = px.pie(df_d_esc, names=col_mot, hole=0.4, title="En Tiempo (≤ 7 días)", color=col_mot, color_discrete_map=color_map)
                     st.plotly_chart(fig2, use_container_width=True)
-            
             st.markdown("---")
-            st.subheader("📋 Detalle General de Escalados")
             st.dataframe(df_esc.sort_values(by='dias_transcurridos', ascending=False).style.apply(estilo_escalados_suave, axis=1), use_container_width=True)
+
+    elif pagina == "4. Resumen Anual":
+        st.title(f"📈 Resumen Anual {selected_year}")
+        df_anual = df[df['FIN'].dt.year == selected_year].copy()
+        if not df_anual.empty:
+            total = len(df_anual); tiempo = len(df_anual[df_anual['DIAS'] <= 7])
+            st.metric("Eficiencia Anual", f"{(tiempo/total*100):.1f}%")
+            df_anual['Cumple'] = df_anual['DIAS'].apply(lambda x: 1 if x <= 7 else 0)
+            tendencia = df_anual.groupby(df_anual['FIN'].dt.month)['Cumple'].mean() * 100
+            fig_line = px.line(x=[meses_map[m] for m in tendencia.index if m in meses_map], y=tendencia.values, markers=True)
+            st.plotly_chart(fig_line, use_container_width=True)
 else:
     st.error("Archivo 'Tickets año.xlsx' no encontrado.")
