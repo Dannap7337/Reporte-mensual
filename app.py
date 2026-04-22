@@ -77,7 +77,7 @@ def calcular_contacto(dias):
     return "Fuera" if (pd.notnull(dias) and dias > 3) else "A tiempo"
 
 # --- FUNCIONES DE ESTILO ---
-def hex_to_rgba(hex_code, opacity=0.4):
+def hex_to_rgba(hex_code, opacity=1.0):
     hex_code = hex_code.lstrip('#')
     r, g, b = int(hex_code[0:2], 16), int(hex_code[2:4], 16), int(hex_code[4:6], 16)
     return f'rgba({r}, {g}, {b}, {opacity})'
