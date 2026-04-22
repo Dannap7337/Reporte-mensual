@@ -70,10 +70,9 @@ def hex_to_rgba(hex_code, opacity=0.3):
 
 def estilo_generacion(row):
     val = limpiar_texto(row['Generacion_Excel'])
-    # MAPEADO MANUAL PARA TABLA: Azul, Gris, Naranja
-    if 'tiempo' in val: color = '#4472C4'
-    elif 'mismo' in val: color = '#A5A5A5'
-    else: color = '#ED7D31'
+    if 'tiempo' in val: color = '#4472C4' # Azul
+    elif 'mismo' in val: color = '#A5A5A5' # Gris
+    else: color = '#ED7D31' # Naranja (para Programados o Fuera)
     return [f'background-color: {hex_to_rgba(color)}; color: black'] * len(row)
 
 def estilo_solucion(row):
@@ -121,6 +120,7 @@ if df is not None:
     meses_map = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
     
     if pagina in ["1. Generación", "2. Solución", "3. Contacto"]:
+        # Solo meses cerrados (Anterior al actual)
         limite = ahora.month if selected_year == ahora.year else 13
         meses_disp = [meses_map[m] for m in range(1, limite)]
         
@@ -141,29 +141,31 @@ if df is not None:
             st.title(f"📊 {pagina} - {sel_mes_nom} {selected_year}")
 
             if pagina == "1. Generación":
-                # Agrupamos y renombramos para asegurar el orden
                 d = df_f['Generacion_Excel_Clean'].value_counts().reset_index()
-                # Mapeamos a nombres bonitos para la leyenda
-                name_map = {'a tiempo': 'A tiempo', 'mismo dia': 'Mismo día', 'fuera': 'Fuera'}
-                d['Etiqueta'] = d['Generacion_Excel_Clean'].map(name_map)
+                # MAPA ACTUALIZADO PARA EVITAR NULLS
+                # Identifica dinámicamente si el texto es a tiempo, mismo dia o programados
+                name_map = {
+                    'a tiempo': 'A tiempo',
+                    'mismo dia': 'Mismo día',
+                    'programados': 'Programados',
+                    'fuera': 'Programados' # Por si acaso
+                }
+                d['Etiqueta'] = d['Generacion_Excel_Clean'].map(lambda x: name_map.get(x, 'Programados'))
                 
-                # ORDENAMOS los datos para que el color coincida siempre con la categoría correcta
-                d['Orden'] = d['Generacion_Excel_Clean'].map({'a tiempo': 0, 'mismo dia': 1, 'fuera': 2})
-                d = d.sort_values('Orden')
-
-                # USAMOS MAPA DE COLORES EXPLÍCITO
+                # Gráfica con colores fijos
                 fig = px.pie(d, values='count', names='Etiqueta', hole=0.5,
                              color='Etiqueta',
                              color_discrete_map={
-                                 'A tiempo': '#4472C4', # AZUL
-                                 'Mismo día': '#A5A5A5', # GRIS
-                                 'Fuera': '#ED7D31'      # NARANJA
+                                 'A tiempo': '#4472C4', # Azul
+                                 'Mismo día': '#A5A5A5', # Gris
+                                 'Programados': '#ED7D31' # Naranja
                              })
                 st.plotly_chart(fig, use_container_width=True)
                 with st.expander("Ver Detalle"): 
                     st.dataframe(df_f.drop(columns=['Generacion_Excel_Clean']).style.apply(estilo_generacion, axis=1), use_container_width=True)
 
             elif pagina == "2. Solución":
+                # Sunburst Gigante con Porcentajes
                 ids, labels, parents, values, colors = [], [], [], [], []
                 c_sol = {'Dentro': '#4472C4', 'Acumulado': '#FFC000', 'Fuera': '#ED7D31', 'Asap': '#ED7D31', 'Programado': '#70AD47'}
                 
@@ -193,12 +195,12 @@ if df is not None:
                                  color='Estatus_Contacto', color_discrete_map={'A tiempo':'#4472C4', 'Fuera':'#ED7D31'})
                     st.plotly_chart(fig, use_container_width=True)
 
-            # Botón Lucid
+            # Botón Lucid dinámico
             link = LINKS_TIMELINE.get((selected_year, sel_mes_num))
             if link: st.markdown(f'<center><a href="{link}" target="_blank" style="text-decoration:none; border:2px solid #4472C4; padding:10px; border-radius:8px; color:#4472C4; font-weight:bold;">🔗 Ver Línea de Tiempo</a></center>', unsafe_allow_html=True)
 
     elif pagina == "5. Escalados":
-        st.title("🚀 Escalados (Histórico)")
+        st.title("🚀 Escalados (Histórico Total)")
         df_esc = load_escalados()
         if df_esc is not None:
             c1, c2 = st.columns(2)
