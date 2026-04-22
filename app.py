@@ -73,7 +73,7 @@ def calcular_detalle_solucion(row):
 def calcular_contacto(dias):
     return "Fuera" if (pd.notnull(dias) and dias > 3) else "A tiempo"
 
-# --- FUNCIONES DE ESTILO (0.3 OPACIDAD) ---
+# --- FUNCIONES DE ESTILO (OPACIDAD 0.3) ---
 def hex_to_rgba(hex_code, opacity=0.3):
     hex_code = hex_code.lstrip('#')
     r, g, b = int(hex_code[0:2], 16), int(hex_code[2:4], 16), int(hex_code[4:6], 16)
@@ -86,7 +86,6 @@ def estilo_generacion(row):
 
 def estilo_solucion(row):
     estatus, detalle = row['Estatus_Solucion'], str(row['Detalle_Solucion'])
-    # RESTAURADO: ASAP en Naranja (#ED7D31) / PROGRAMADO en Verde (#70AD47)
     color_hex = '#4472C4' if estatus == 'Dentro' else ('#FFC000' if estatus == 'Acumulado' else ('#ED7D31' if 'Asap' in detalle else ('#70AD47' if 'Programado' in detalle else '#ED7D31')))
     return [f'background-color: {hex_to_rgba(color_hex)}; color: black'] * len(row)
 
@@ -109,9 +108,8 @@ def load_data():
                 if c in df.columns: df[c] = pd.to_datetime(df[c], dayfirst=True, errors='coerce')
             if 'INICIO' in df.columns and 'FIN' in df.columns:
                 df['DIAS'] = df.apply(lambda x: contar_dias_habiles(x['INICIO'], x['FIN']) if pd.notnull(x['FIN']) else np.nan, axis=1)
-            col_gen_real = next((col for col in df.columns if "GENERACI" in col.upper() and "TICKET" in col.upper()), None)
-            df.rename(columns={col_gen_real: 'Generacion_Excel'} if col_gen_real else {}, inplace=True)
-            if 'Generacion_Excel' not in df.columns: df['Generacion_Excel'] = "No encontrado"
+            col_gen_real = next((col for col in df.columns if "GENERACI" in col.upper()), 'Generacion_Excel')
+            df.rename(columns={col_gen_real: 'Generacion_Excel'}, inplace=True)
             return df
     return None
 
@@ -139,7 +137,6 @@ if df is not None:
     meses_map = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
     
     if pagina in ["1. Generación", "2. Solución", "3. Contacto"]:
-        # Filtro estricto: Solo meses cerrados (Marzo es el último si hoy es Abril)
         limite_mes = ahora.month if selected_year == ahora.year else 13
         meses_disp_nums = [m for m in range(1, limite_mes)]
         
@@ -172,7 +169,7 @@ if df is not None:
             elif pagina == "2. Solución":
                 conteo = df_f['Estatus_Solucion'].value_counts()
                 ids, labels, parents, values, colors = [], [], [], [], []
-                # RESTAURADO: ASAP en Naranja (#ED7D31)
+                # MAPA DE COLORES ORIGINAL
                 c_map = {'Dentro': '#4472C4', 'Acumulado': '#FFC000', 'Fuera': '#ED7D31', 'Asap': '#ED7D31', 'Programado': '#70AD47'}
 
                 for n in ['Dentro', 'Acumulado', 'Fuera']:
@@ -187,6 +184,8 @@ if df is not None:
                 fig = go.Figure(go.Sunburst(ids=ids, labels=labels, parents=parents, values=values, branchvalues="total",
                     marker=dict(colors=colors, line=dict(color='#ffffff', width=2)), leaf=dict(opacity=1),
                     textinfo="label+value+percent entry"))
+                # AUMENTO DE TAMAÑO Y AJUSTE DE MÁRGENES
+                fig.update_layout(height=850, margin=dict(t=10, l=10, r=10, b=10))
                 st.plotly_chart(fig, use_container_width=True)
                 with st.expander("Ver Detalle"): st.dataframe(df_f.style.apply(estilo_solucion, axis=1), use_container_width=True)
 
