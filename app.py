@@ -27,9 +27,8 @@ LINKS_TIMELINE = {
     (2026, 2): "https://lucid.app/lucidspark/81cc3721-e383-4dad-a64f-25644745f3f6/edit"
 }
 
-# --- FUNCIONES DE AUXILIARES ---
+# --- FUNCIONES AUXILIARES ---
 def limpiar_texto(texto):
-    """Quita tildes, convierte a minúsculas y elimina espacios."""
     if pd.isna(texto): return ""
     texto = str(texto).lower().strip()
     texto = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
@@ -71,8 +70,10 @@ def hex_to_rgba(hex_code, opacity=0.3):
 
 def estilo_generacion(row):
     val = limpiar_texto(row['Generacion_Excel'])
-    # RESTAURADO: Azul, Gris, Naranja
-    color = '#4472C4' if 'tiempo' in val else ('#A5A5A5' if 'mismo' in val else '#ED7D31')
+    # MAPEADO MANUAL PARA TABLA: Azul, Gris, Naranja
+    if 'tiempo' in val: color = '#4472C4'
+    elif 'mismo' in val: color = '#A5A5A5'
+    else: color = '#ED7D31'
     return [f'background-color: {hex_to_rgba(color)}; color: black'] * len(row)
 
 def estilo_solucion(row):
@@ -108,12 +109,13 @@ def load_escalados():
         return df
     return None
 
-# --- APP ---
+# --- SIDEBAR ---
 st.sidebar.title("Menú Principal")
 pagina = st.sidebar.radio("Selecciona:", ["1. Generación", "2. Solución", "3. Contacto", "4. Resumen Anual", "5. Escalados"])
 selected_year = st.sidebar.selectbox("Año", [2025, 2026], index=1)
 
 df = load_data()
+
 if df is not None:
     ahora = pd.Timestamp.now()
     meses_map = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
@@ -126,41 +128,43 @@ if df is not None:
             sel_mes_nom = st.sidebar.selectbox("Mes", meses_disp, index=len(meses_disp)-1)
             sel_mes_num = next(k for k,v in meses_map.items() if v==sel_mes_nom)
             
-            # Filtrado Mensual
             ini_m = pd.Timestamp(selected_year, sel_mes_num, 1)
             fin_m = pd.Timestamp(selected_year, sel_mes_num, monthrange(selected_year, sel_mes_num)[1], 23, 59)
             df_f = df[(df['INICIO'] <= fin_m) & ((df['FIN'].isnull()) | (df['FIN'] >= ini_m))].copy()
             
-            # Limpieza agresiva de datos para Generación
+            # Limpieza para gráficas
             df_f['Generacion_Excel_Clean'] = df_f['Generacion_Excel'].apply(limpiar_texto)
             df_f['Estatus_Solucion'] = df_f.apply(lambda x: calcular_estatus_solucion(x, fin_m, ini_m), axis=1)
             df_f = df_f[df_f['Estatus_Solucion'] != 'IGNORAR']
             df_f['Detalle_Solucion'] = df_f.apply(calcular_detalle_solucion, axis=1)
 
-            st.title(f"📊 {pagina} - {sel_mes_nom}")
+            st.title(f"📊 {pagina} - {sel_mes_nom} {selected_year}")
 
             if pagina == "1. Generación":
+                # Agrupamos y renombramos para asegurar el orden
                 d = df_f['Generacion_Excel_Clean'].value_counts().reset_index()
-                # MAPEADO EXHAUSTIVO DE COLORES (Nombres limpios -> Color exacto)
-                fig = px.pie(d, values='count', names='Generacion_Excel_Clean', hole=0.5,
-                             color='Generacion_Excel_Clean',
+                # Mapeamos a nombres bonitos para la leyenda
+                name_map = {'a tiempo': 'A tiempo', 'mismo dia': 'Mismo día', 'fuera': 'Fuera'}
+                d['Etiqueta'] = d['Generacion_Excel_Clean'].map(name_map)
+                
+                # ORDENAMOS los datos para que el color coincida siempre con la categoría correcta
+                d['Orden'] = d['Generacion_Excel_Clean'].map({'a tiempo': 0, 'mismo dia': 1, 'fuera': 2})
+                d = d.sort_values('Orden')
+
+                # USAMOS MAPA DE COLORES EXPLÍCITO
+                fig = px.pie(d, values='count', names='Etiqueta', hole=0.5,
+                             color='Etiqueta',
                              color_discrete_map={
-                                 'a tiempo': '#4472C4', # Azul
-                                 'mismo dia': '#A5A5A5', # Gris
-                                 'fuera': '#ED7D31'      # Naranja
-                             },
-                             labels={
-                                 'a tiempo': 'A tiempo',
-                                 'mismo dia': 'Mismo día',
-                                 'fuera': 'Fuera'
+                                 'A tiempo': '#4472C4', # AZUL
+                                 'Mismo día': '#A5A5A5', # GRIS
+                                 'Fuera': '#ED7D31'      # NARANJA
                              })
-                fig.update_layout(showlegend=True)
                 st.plotly_chart(fig, use_container_width=True)
-                with st.expander("Detalle"): st.dataframe(df_f.drop(columns=['Generacion_Excel_Clean']).style.apply(estilo_generacion, axis=1), use_container_width=True)
+                with st.expander("Ver Detalle"): 
+                    st.dataframe(df_f.drop(columns=['Generacion_Excel_Clean']).style.apply(estilo_generacion, axis=1), use_container_width=True)
 
             elif pagina == "2. Solución":
                 ids, labels, parents, values, colors = [], [], [], [], []
-                # Mapa de Solución (mantenido)
                 c_sol = {'Dentro': '#4472C4', 'Acumulado': '#FFC000', 'Fuera': '#ED7D31', 'Asap': '#ED7D31', 'Programado': '#70AD47'}
                 
                 counts = df_f['Estatus_Solucion'].value_counts()
@@ -178,7 +182,8 @@ if df is not None:
                     textinfo="label+value+percent entry"))
                 fig.update_layout(height=850, margin=dict(t=10, b=10, l=10, r=10))
                 st.plotly_chart(fig, use_container_width=True)
-                with st.expander("Detalle"): st.dataframe(df_f.drop(columns=['Generacion_Excel_Clean']).style.apply(estilo_solucion, axis=1), use_container_width=True)
+                with st.expander("Ver Detalle"): 
+                    st.dataframe(df_f.drop(columns=['Generacion_Excel_Clean']).style.apply(estilo_solucion, axis=1), use_container_width=True)
 
             elif pagina == "3. Contacto":
                 if 'DIAS PRIMER CONTACTO' in df_f.columns:
