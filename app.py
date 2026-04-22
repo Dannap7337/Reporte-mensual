@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 import os
 import numpy as np
 from calendar import monthrange
+import unicodedata
 
 st.set_page_config(page_title="Reporte TI", layout="wide")
 
@@ -26,7 +27,14 @@ LINKS_TIMELINE = {
     (2026, 2): "https://lucid.app/lucidspark/81cc3721-e383-4dad-a64f-25644745f3f6/edit"
 }
 
-# --- FUNCIONES DE LÓGICA ---
+# --- FUNCIONES DE AUXILIARES ---
+def limpiar_texto(texto):
+    """Quita tildes, convierte a minúsculas y elimina espacios."""
+    if pd.isna(texto): return ""
+    texto = str(texto).lower().strip()
+    texto = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
+    return texto
+
 def contar_dias_habiles(inicio, fin):
     try:
         if pd.isna(inicio) or pd.isna(fin): return 0
@@ -48,9 +56,9 @@ def calcular_estatus_solucion(row, fecha_limite, fecha_inicio_mes):
 
 def calcular_detalle_solucion(row):
     if row['Estatus_Solucion'] == 'Fuera':
-        gen_val = str(row['Generacion_Excel']).strip().lower()
+        gen_val = limpiar_texto(row['Generacion_Excel'])
         if 'mismo' in gen_val: return 'Asap'
-        txt = str(row['RANGO']).lower()
+        txt = limpiar_texto(row['RANGO'])
         if 'program' in txt: return 'Programado'
         return 'Asap'
     return np.nan 
@@ -62,14 +70,15 @@ def hex_to_rgba(hex_code, opacity=0.3):
     return f'rgba({r}, {g}, {b}, {opacity})'
 
 def estilo_generacion(row):
-    val = str(row['Generacion_Excel']).strip()
-    color = '#4472C4' if 'A tiempo' in val else ('#ED7D31' if 'Mismo' in val else '#FFC000')
+    val = limpiar_texto(row['Generacion_Excel'])
+    # RESTAURADO: Azul, Gris, Naranja
+    color = '#4472C4' if 'tiempo' in val else ('#A5A5A5' if 'mismo' in val else '#ED7D31')
     return [f'background-color: {hex_to_rgba(color)}; color: black'] * len(row)
 
 def estilo_solucion(row):
     est = row['Estatus_Solucion']
-    det = str(row['Detalle_Solucion'])
-    color = '#4472C4' if est == 'Dentro' else ('#FFC000' if est == 'Acumulado' else ('#70AD47' if 'Programado' in det else '#ED7D31'))
+    det = str(row['Detalle_Solucion']).lower()
+    color = '#4472C4' if est == 'Dentro' else ('#FFC000' if est == 'Acumulado' else ('#70AD47' if 'programado' in det else '#ED7D31'))
     return [f'background-color: {hex_to_rgba(color)}; color: black'] * len(row)
 
 # --- CARGA DE DATOS ---
@@ -121,7 +130,9 @@ if df is not None:
             ini_m = pd.Timestamp(selected_year, sel_mes_num, 1)
             fin_m = pd.Timestamp(selected_year, sel_mes_num, monthrange(selected_year, sel_mes_num)[1], 23, 59)
             df_f = df[(df['INICIO'] <= fin_m) & ((df['FIN'].isnull()) | (df['FIN'] >= ini_m))].copy()
-            df_f['Generacion_Excel'] = df_f['Generacion_Excel'].astype(str).str.strip()
+            
+            # Limpieza agresiva de datos para Generación
+            df_f['Generacion_Excel_Clean'] = df_f['Generacion_Excel'].apply(limpiar_texto)
             df_f['Estatus_Solucion'] = df_f.apply(lambda x: calcular_estatus_solucion(x, fin_m, ini_m), axis=1)
             df_f = df_f[df_f['Estatus_Solucion'] != 'IGNORAR']
             df_f['Detalle_Solucion'] = df_f.apply(calcular_detalle_solucion, axis=1)
@@ -129,17 +140,27 @@ if df is not None:
             st.title(f"📊 {pagina} - {sel_mes_nom}")
 
             if pagina == "1. Generación":
-                d = df_f['Generacion_Excel'].value_counts().reset_index()
-                # CORRECCIÓN DE COLORES AQUÍ
-                fig = px.pie(d, values='count', names='Generacion_Excel', hole=0.5,
-                             color='Generacion_Excel',
-                             color_discrete_map={'A tiempo': '#4472C4', 'Mismo día': '#ED7D31', 'Fuera': '#FFC000'})
+                d = df_f['Generacion_Excel_Clean'].value_counts().reset_index()
+                # MAPEADO EXHAUSTIVO DE COLORES (Nombres limpios -> Color exacto)
+                fig = px.pie(d, values='count', names='Generacion_Excel_Clean', hole=0.5,
+                             color='Generacion_Excel_Clean',
+                             color_discrete_map={
+                                 'a tiempo': '#4472C4', # Azul
+                                 'mismo dia': '#A5A5A5', # Gris
+                                 'fuera': '#ED7D31'      # Naranja
+                             },
+                             labels={
+                                 'a tiempo': 'A tiempo',
+                                 'mismo dia': 'Mismo día',
+                                 'fuera': 'Fuera'
+                             })
+                fig.update_layout(showlegend=True)
                 st.plotly_chart(fig, use_container_width=True)
-                with st.expander("Detalle"): st.dataframe(df_f.style.apply(estilo_generacion, axis=1), use_container_width=True)
+                with st.expander("Detalle"): st.dataframe(df_f.drop(columns=['Generacion_Excel_Clean']).style.apply(estilo_generacion, axis=1), use_container_width=True)
 
             elif pagina == "2. Solución":
-                # Sunburst Gigante
                 ids, labels, parents, values, colors = [], [], [], [], []
+                # Mapa de Solución (mantenido)
                 c_sol = {'Dentro': '#4472C4', 'Acumulado': '#FFC000', 'Fuera': '#ED7D31', 'Asap': '#ED7D31', 'Programado': '#70AD47'}
                 
                 counts = df_f['Estatus_Solucion'].value_counts()
@@ -150,14 +171,14 @@ if df is not None:
                 df_fuera = df_f[df_f['Estatus_Solucion'] == 'Fuera']
                 for subtipo, cant in df_fuera['Detalle_Solucion'].value_counts().items():
                     ids.append(f"F_{subtipo}"); labels.append(subtipo); parents.append("Fuera"); values.append(cant)
-                    colors.append(c_sol['Programado'] if 'Programado' in str(subtipo) else c_sol['Asap'])
+                    colors.append(c_sol['Programado'] if 'programado' in str(subtipo).lower() else c_sol['Asap'])
                 
                 fig = go.Figure(go.Sunburst(ids=ids, labels=labels, parents=parents, values=values, branchvalues="total",
                     marker=dict(colors=colors, line=dict(color='#ffffff', width=2)), leaf=dict(opacity=1),
                     textinfo="label+value+percent entry"))
                 fig.update_layout(height=850, margin=dict(t=10, b=10, l=10, r=10))
                 st.plotly_chart(fig, use_container_width=True)
-                with st.expander("Detalle"): st.dataframe(df_f.style.apply(estilo_solucion, axis=1), use_container_width=True)
+                with st.expander("Detalle"): st.dataframe(df_f.drop(columns=['Generacion_Excel_Clean']).style.apply(estilo_solucion, axis=1), use_container_width=True)
 
             elif pagina == "3. Contacto":
                 if 'DIAS PRIMER CONTACTO' in df_f.columns:
@@ -176,15 +197,14 @@ if df is not None:
         df_esc = load_escalados()
         if df_esc is not None:
             c1, c2 = st.columns(2)
-            # Pie charts con colores consistentes
             motivos = df_esc['Motivo'].unique()
             color_p = {m: px.colors.qualitative.Prism[i % 10] for i, m in enumerate(motivos)}
             
             df_f_e = df_esc[df_esc['dias_transcurridos'] > 7]
             df_d_e = df_esc[df_esc['dias_transcurridos'] <= 7]
             
-            with c1: st.plotly_chart(px.pie(df_f_e, names='Motivo', title="Fuera de Tiempo", color='Motivo', color_discrete_map=color_p), use_container_width=True)
-            with c2: st.plotly_chart(px.pie(df_d_e, names='Motivo', title="En Tiempo", color='Motivo', color_discrete_map=color_p), use_container_width=True)
+            with c1: st.plotly_chart(px.pie(df_f_e, names='Motivo', title="Fuera de Tiempo (> 7 días)", color='Motivo', color_discrete_map=color_p), use_container_width=True)
+            with c2: st.plotly_chart(px.pie(df_d_e, names='Motivo', title="En Tiempo (≤ 7 días)", color='Motivo', color_discrete_map=color_p), use_container_width=True)
             
             st.dataframe(df_esc.style.apply(lambda r: [f'background-color: {hex_to_rgba("#DC3545" if r.dias_transcurridos > 7 else "#28A745")}; color:black']*len(r), axis=1), use_container_width=True)
 
