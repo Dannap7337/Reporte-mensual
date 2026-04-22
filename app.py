@@ -65,8 +65,8 @@ def calcular_detalle_solucion(row):
 def calcular_contacto(dias):
     return "Fuera" if (pd.notnull(dias) and dias > 3) else "A tiempo"
 
-# --- FUNCIONES DE ESTILO (CORREGIDO A 1.0) ---
-def hex_to_rgba(hex_code, opacity=1.0):
+# --- FUNCIONES DE ESTILO ---
+def hex_to_rgba(hex_code, opacity=0.4):
     hex_code = hex_code.lstrip('#')
     r, g, b = int(hex_code[0:2], 16), int(hex_code[2:4], 16), int(hex_code[4:6], 16)
     return f'rgba({r}, {g}, {b}, {opacity})'
@@ -74,17 +74,17 @@ def hex_to_rgba(hex_code, opacity=1.0):
 def estilo_generacion(row):
     val = str(row['Generacion_Excel'])
     color_hex = '#4472C4' if 'A tiempo' in val else ('#ED7D31' if 'Mismo' in val else ('#FFC000' if 'Fuera' in val else '#A5A5A5'))
-    # Usamos texto blanco para mejor legibilidad en colores sólidos oscuros
-    return [f'background-color: {hex_to_rgba(color_hex, 1.0)}; color: white'] * len(row)
+    return [f'background-color: {hex_to_rgba(color_hex, 0.4)}; color: black'] * len(row)
 
 def estilo_solucion(row):
     estatus, detalle = row['Estatus_Solucion'], str(row['Detalle_Solucion'])
     color_hex = '#4472C4' if estatus == 'Dentro' else ('#FFC000' if estatus == 'Acumulado' else ('#A5A5A5' if 'Asap' in detalle else ('#70AD47' if 'Programado' in detalle else '#ED7D31')))
-    return [f'background-color: {hex_to_rgba(color_hex, 1.0)}; color: white'] * len(row)
+    return [f'background-color: {hex_to_rgba(color_hex, 0.4)}; color: black'] * len(row)
 
 def estilo_contacto(row):
     color_hex = '#4472C4' if row['Estatus_Contacto'] == 'A tiempo' else '#ED7D31'
-    return [f'background-color: {hex_to_rgba(color_hex, 1.0)}; color: white'] * len(row)
+    return [f'background-color: {hex_to_rgba(color_hex, 0.4)}; color: black'] * len(row)
+
 
 # --- CARGA DE DATOS ---
 @st.cache_data(ttl=300) 
