@@ -54,10 +54,10 @@ def calcular_estatus_solucion(row, fecha_limite, fecha_inicio_mes):
     return "Dentro" if (row['DIAS'] if pd.notnull(row['DIAS']) else 0) <= 7 else "Fuera"
 
 def calcular_detalle_solucion(row):
-    if row['Estatus_Solucion'] == 'Fuera':
-        gen_val = limpiar_texto(row['Generacion_Excel'])
+    if 'Estatus_Solucion' in row and row['Estatus_Solucion'] == 'Fuera':
+        gen_val = limpiar_texto(row.get('Generacion_Excel', ''))
         if 'mismo' in gen_val: return 'Asap'
-        txt = limpiar_texto(row['RANGO'])
+        txt = limpiar_texto(row.get('RANGO', ''))
         if 'program' in txt: return 'Programado'
         return 'Asap'
     return np.nan 
@@ -69,20 +69,20 @@ def hex_to_rgba(hex_code, opacity=0.3):
     return f'rgba({r}, {g}, {b}, {opacity})'
 
 def estilo_generacion(row):
-    val = limpiar_texto(row['Generacion_Excel'])
+    val = limpiar_texto(row.get('Generacion_Excel', ''))
     if 'tiempo' in val: color = '#4472C4' 
     elif 'mismo' in val: color = '#A5A5A5' 
     else: color = '#ED7D31' 
     return [f'background-color: {hex_to_rgba(color)}; color: black'] * len(row)
 
 def estilo_solucion(row):
-    est = row['Estatus_Solucion']
-    det = str(row['Detalle_Solucion']).lower()
+    est = row.get('Estatus_Solucion', 'Fuera')
+    det = str(row.get('Detalle_Solucion', '')).lower()
     color = '#4472C4' if est == 'Dentro' else ('#FFC000' if est == 'Acumulado' else ('#70AD47' if 'programado' in det else '#ED7D31'))
     return [f'background-color: {hex_to_rgba(color)}; color: black'] * len(row)
 
 def estilo_contacto(row):
-    color = '#4472C4' if row['Estatus_Contacto'] == 'A tiempo' else '#ED7D31'
+    color = '#4472C4' if row.get('Estatus_Contacto', '') == 'A tiempo' else '#ED7D31'
     return [f'background-color: {hex_to_rgba(color)}; color: black'] * len(row)
 
 # --- CARGA DE DATOS ---
@@ -123,7 +123,6 @@ if df is not None:
     ahora = pd.Timestamp.now()
     meses_map = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
     
-    # --- PÁGINAS MENSUALES ---
     if pagina in ["1. Generación", "2. Solución", "3. Contacto"]:
         limite = ahora.month if selected_year == ahora.year else 13
         meses_disp = [meses_map[m] for m in range(1, limite)]
@@ -183,7 +182,7 @@ if df is not None:
             link = LINKS_TIMELINE.get((selected_year, sel_mes_num))
             if link: st.markdown(f'<center><a href="{link}" target="_blank" style="text-decoration:none; border:2px solid #4472C4; padding:10px; border-radius:8px; color:#4472C4; font-weight:bold;">🔗 Ver Línea de Tiempo</a></center>', unsafe_allow_html=True)
 
-    # --- RESUMEN ANUAL ---
+    # --- PÁGINA 4: RESUMEN ANUAL ---
     elif pagina == "4. Resumen Anual":
         st.title(f"📈 Resumen Anual {selected_year}")
         df_anual = df[df['FIN'].dt.year == selected_year].copy()
@@ -192,14 +191,19 @@ if df is not None:
             c1, c2 = st.columns(2)
             c1.metric(f"Total Tickets {selected_year}", total)
             c2.metric("Eficiencia Anual Promedio", f"{(tiempo/total*100):.1f}%")
+            
             df_anual['Cumple'] = df_anual['DIAS'].apply(lambda x: 1 if x <= 7 else 0)
             tendencia = df_anual.groupby(df_anual['FIN'].dt.month)['Cumple'].mean() * 100
-            fig_line = px.line(x=[meses_map[m] for m in tendencia.index], y=tendencia.values, markers=True)
+            fig_line = px.line(x=[meses_map[m] for m in tendencia.index if m in meses_map], y=tendencia.values, markers=True)
             st.plotly_chart(fig_line, use_container_width=True)
+            
+            # MOSTRAR TABLA LIMPIA (Sin estilos de colores)
             with st.expander("Ver Todos los Tickets del Año"):
-                st.dataframe(df_anual.style.apply(estilo_solucion, axis=1), use_container_width=True)
+                st.dataframe(df_anual, use_container_width=True)
+        else:
+            st.info(f"Sin datos cerrados para {selected_year}.")
 
-    # --- ESCALADOS ---
+    # --- PÁGINA 5: ESCALADOS ---
     elif pagina == "5. Escalados":
         st.title("🚀 Escalados (Histórico Total)")
         df_esc = load_escalados()
