@@ -185,7 +185,7 @@ if df is not None:
                     with st.expander("Ver Detalle"): st.dataframe(df_f.style.apply(estilo_contacto, axis=1), use_container_width=True)
 
     elif pagina == "5. Escalados":
-        st.title("🚀 Reporte de Tickets Escalados (Histórico Total)")
+        st.title("Reporte de Tickets Escalados")
         df_esc = load_escalados()
         if df_esc is not None:
             col_mot = next((c for c in df_esc.columns if c.lower() == 'motivo'), 'Motivo')
