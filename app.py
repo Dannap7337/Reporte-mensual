@@ -16,7 +16,7 @@ FERIADOS = [
 ]
 feriados_np = np.array(FERIADOS, dtype='datetime64[D]')
 
-# --- CONFIGURACIÓN DE ENLACES DE LÍNEAS DE TIEMPO ---
+# --- ENLACES DE LÍNEAS DE TIEMPO ---
 LINKS_TIMELINE = {
     (2025, 8): "https://lucid.app/lucidspark/543f6a91-1a33-4c3b-a36a-c1aa7ed7e063/edit",
     (2025, 9): "https://lucid.app/lucidspark/b6d966fe-81c8-4c80-b434-8b887b9f478c/edit",
@@ -62,7 +62,7 @@ def calcular_detalle_solucion(row):
         return 'Asap'
     return np.nan 
 
-# --- ESTILOS DE TABLA (OPACIDAD 0.3) ---
+# --- ESTILOS (OPACIDAD 0.3) ---
 def hex_to_rgba(hex_code, opacity=0.3):
     hex_code = hex_code.lstrip('#')
     r, g, b = int(hex_code[0:2], 16), int(hex_code[2:4], 16), int(hex_code[4:6], 16)
@@ -70,9 +70,9 @@ def hex_to_rgba(hex_code, opacity=0.3):
 
 def estilo_generacion(row):
     val = limpiar_texto(row['Generacion_Excel'])
-    if 'tiempo' in val: color = '#4472C4' # Azul
-    elif 'mismo' in val: color = '#A5A5A5' # Gris
-    else: color = '#ED7D31' # Naranja (para Programados o Fuera)
+    if 'tiempo' in val: color = '#4472C4' 
+    elif 'mismo' in val: color = '#A5A5A5' 
+    else: color = '#ED7D31' 
     return [f'background-color: {hex_to_rgba(color)}; color: black'] * len(row)
 
 def estilo_solucion(row):
@@ -88,7 +88,7 @@ def load_data():
         if os.path.exists(f):
             df = pd.read_excel(f) if 'xls' in f else pd.read_csv(f)
             df.columns = df.columns.str.strip()
-            for c in ['INICIO', 'FIN']:
+            for c in ['INICIO', 'FIN', 'CORREO']:
                 if c in df.columns: df[c] = pd.to_datetime(df[c], dayfirst=True, errors='coerce')
             df['DIAS'] = df.apply(lambda x: contar_dias_habiles(x['INICIO'], x['FIN']) if pd.notnull(x['FIN']) else np.nan, axis=1)
             col_gen = next((col for col in df.columns if "GENERACI" in col.upper()), 'Generacion_Excel')
@@ -119,8 +119,8 @@ if df is not None:
     ahora = pd.Timestamp.now()
     meses_map = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
     
+    # PÁGINAS MENSUALES (1, 2, 3)
     if pagina in ["1. Generación", "2. Solución", "3. Contacto"]:
-        # Solo meses cerrados (Anterior al actual)
         limite = ahora.month if selected_year == ahora.year else 13
         meses_disp = [meses_map[m] for m in range(1, limite)]
         
@@ -131,8 +131,6 @@ if df is not None:
             ini_m = pd.Timestamp(selected_year, sel_mes_num, 1)
             fin_m = pd.Timestamp(selected_year, sel_mes_num, monthrange(selected_year, sel_mes_num)[1], 23, 59)
             df_f = df[(df['INICIO'] <= fin_m) & ((df['FIN'].isnull()) | (df['FIN'] >= ini_m))].copy()
-            
-            # Limpieza para gráficas
             df_f['Generacion_Excel_Clean'] = df_f['Generacion_Excel'].apply(limpiar_texto)
             df_f['Estatus_Solucion'] = df_f.apply(lambda x: calcular_estatus_solucion(x, fin_m, ini_m), axis=1)
             df_f = df_f[df_f['Estatus_Solucion'] != 'IGNORAR']
@@ -142,77 +140,74 @@ if df is not None:
 
             if pagina == "1. Generación":
                 d = df_f['Generacion_Excel_Clean'].value_counts().reset_index()
-                # MAPA ACTUALIZADO PARA EVITAR NULLS
-                # Identifica dinámicamente si el texto es a tiempo, mismo dia o programados
-                name_map = {
-                    'a tiempo': 'A tiempo',
-                    'mismo dia': 'Mismo día',
-                    'programados': 'Programados',
-                    'fuera': 'Programados' # Por si acaso
-                }
+                name_map = {'a tiempo': 'A tiempo', 'mismo dia': 'Mismo día', 'programados': 'Programados', 'fuera': 'Programados'}
                 d['Etiqueta'] = d['Generacion_Excel_Clean'].map(lambda x: name_map.get(x, 'Programados'))
-                
-                # Gráfica con colores fijos
-                fig = px.pie(d, values='count', names='Etiqueta', hole=0.5,
-                             color='Etiqueta',
-                             color_discrete_map={
-                                 'A tiempo': '#4472C4', # Azul
-                                 'Mismo día': '#A5A5A5', # Gris
-                                 'Programados': '#ED7D31' # Naranja
-                             })
+                fig = px.pie(d, values='count', names='Etiqueta', hole=0.5, color='Etiqueta',
+                             color_discrete_map={'A tiempo': '#4472C4', 'Mismo día': '#A5A5A5', 'Programados': '#ED7D31'})
                 st.plotly_chart(fig, use_container_width=True)
-                with st.expander("Ver Detalle"): 
-                    st.dataframe(df_f.drop(columns=['Generacion_Excel_Clean']).style.apply(estilo_generacion, axis=1), use_container_width=True)
 
             elif pagina == "2. Solución":
-                # Sunburst Gigante con Porcentajes
                 ids, labels, parents, values, colors = [], [], [], [], []
                 c_sol = {'Dentro': '#4472C4', 'Acumulado': '#FFC000', 'Fuera': '#ED7D31', 'Asap': '#ED7D31', 'Programado': '#70AD47'}
-                
                 counts = df_f['Estatus_Solucion'].value_counts()
                 for n in ['Dentro', 'Acumulado', 'Fuera']:
                     if n in counts:
                         ids.append(n); labels.append(n); parents.append(""); values.append(counts[n]); colors.append(c_sol[n])
-                
                 df_fuera = df_f[df_f['Estatus_Solucion'] == 'Fuera']
                 for subtipo, cant in df_fuera['Detalle_Solucion'].value_counts().items():
                     ids.append(f"F_{subtipo}"); labels.append(subtipo); parents.append("Fuera"); values.append(cant)
                     colors.append(c_sol['Programado'] if 'programado' in str(subtipo).lower() else c_sol['Asap'])
-                
                 fig = go.Figure(go.Sunburst(ids=ids, labels=labels, parents=parents, values=values, branchvalues="total",
-                    marker=dict(colors=colors, line=dict(color='#ffffff', width=2)), leaf=dict(opacity=1),
-                    textinfo="label+value+percent entry"))
-                fig.update_layout(height=850, margin=dict(t=10, b=10, l=10, r=10))
+                    marker=dict(colors=colors, line=dict(color='#ffffff', width=2)), leaf=dict(opacity=1), textinfo="label+value+percent entry"))
+                fig.update_layout(height=850)
                 st.plotly_chart(fig, use_container_width=True)
-                with st.expander("Ver Detalle"): 
-                    st.dataframe(df_f.drop(columns=['Generacion_Excel_Clean']).style.apply(estilo_solucion, axis=1), use_container_width=True)
 
             elif pagina == "3. Contacto":
                 if 'DIAS PRIMER CONTACTO' in df_f.columns:
                     df_f['Estatus_Contacto'] = df_f['DIAS PRIMER CONTACTO'].apply(lambda x: "Fuera" if x > 3 else "A tiempo")
                     d = df_f['Estatus_Contacto'].value_counts().reset_index()
-                    fig = px.pie(d, values='count', names='Estatus_Contacto', hole=0.5, 
-                                 color='Estatus_Contacto', color_discrete_map={'A tiempo':'#4472C4', 'Fuera':'#ED7D31'})
+                    fig = px.pie(d, values='count', names='Estatus_Contacto', hole=0.5, color='Estatus_Contacto', color_discrete_map={'A tiempo':'#4472C4', 'Fuera':'#ED7D31'})
                     st.plotly_chart(fig, use_container_width=True)
 
-            # Botón Lucid dinámico
             link = LINKS_TIMELINE.get((selected_year, sel_mes_num))
             if link: st.markdown(f'<center><a href="{link}" target="_blank" style="text-decoration:none; border:2px solid #4472C4; padding:10px; border-radius:8px; color:#4472C4; font-weight:bold;">🔗 Ver Línea de Tiempo</a></center>', unsafe_allow_html=True)
 
+    # PÁGINA 4: RESUMEN ANUAL
+    elif pagina == "4. Resumen Anual":
+        st.title(f"📈 Resumen Anual {selected_year}")
+        df_anual = df[df['FIN'].dt.year == selected_year].copy()
+        if not df_anual.empty:
+            total = len(df_anual)
+            tiempo = len(df_anual[df_anual['DIAS'] <= 7])
+            c1, c2 = st.columns(2)
+            c1.metric(f"Total Tickets {selected_year}", total)
+            c2.metric("Eficiencia Anual Promedio", f"{(tiempo/total*100):.1f}%")
+            
+            st.markdown("### 📈 Tendencia de Eficiencia (Cerrados en ≤ 7 días)")
+            df_anual['Cumple'] = df_anual['DIAS'].apply(lambda x: 1 if x <= 7 else 0)
+            tendencia = df_anual.groupby(df_anual['FIN'].dt.month)['Cumple'].mean() * 100
+            
+            fig_line = px.line(x=[meses_map[m] for m in tendencia.index if m in meses_map], y=tendencia.values, markers=True)
+            fig_line.update_layout(yaxis_title="% Eficiencia", xaxis_title="Mes", yaxis_range=[0, 105])
+            st.plotly_chart(fig_line, use_container_width=True)
+            
+            with st.expander("Ver Datos Base del Año"):
+                st.dataframe(df_anual.style.apply(estilo_solucion, axis=1), use_container_width=True)
+        else:
+            st.info(f"No hay tickets cerrados registrados para el año {selected_year}.")
+
+    # PÁGINA 5: ESCALADOS
     elif pagina == "5. Escalados":
-        st.title("🚀 Escalados (Histórico Total)")
+        st.title("🚀 Escalados (Histórico)")
         df_esc = load_escalados()
         if df_esc is not None:
             c1, c2 = st.columns(2)
             motivos = df_esc['Motivo'].unique()
             color_p = {m: px.colors.qualitative.Prism[i % 10] for i, m in enumerate(motivos)}
-            
             df_f_e = df_esc[df_esc['dias_transcurridos'] > 7]
             df_d_e = df_esc[df_esc['dias_transcurridos'] <= 7]
-            
-            with c1: st.plotly_chart(px.pie(df_f_e, names='Motivo', title="Fuera de Tiempo (> 7 días)", color='Motivo', color_discrete_map=color_p), use_container_width=True)
-            with c2: st.plotly_chart(px.pie(df_d_e, names='Motivo', title="En Tiempo (≤ 7 días)", color='Motivo', color_discrete_map=color_p), use_container_width=True)
-            
+            with c1: st.plotly_chart(px.pie(df_f_e, names='Motivo', title="Fuera de Tiempo", color='Motivo', color_discrete_map=color_p), use_container_width=True)
+            with c2: st.plotly_chart(px.pie(df_d_e, names='Motivo', title="En Tiempo", color='Motivo', color_discrete_map=color_p), use_container_width=True)
             st.dataframe(df_esc.style.apply(lambda r: [f'background-color: {hex_to_rgba("#DC3545" if r.dias_transcurridos > 7 else "#28A745")}; color:black']*len(r), axis=1), use_container_width=True)
 
 else:
