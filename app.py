@@ -204,19 +204,19 @@ if df is not None:
             st.info(f"Sin datos cerrados para {selected_year}.")
 
     # --- PÁGINA 5: ESCALADOS ---
-    elif pagina == "5. Escalados":
-        st.title("🚀 Escalados (Histórico Total)")
-        df_esc = load_escalados()
-        if df_esc is not None:
-            c1, c2 = st.columns(2)
-            motivos = df_esc['Motivo'].unique()
-            color_p = {m: px.colors.qualitative.Prism[i % 10] for i, m in enumerate(motivos)}
-            df_f_e = df_esc[df_esc['dias_transcurridos'] > 7]
-            df_d_e = df_esc[df_esc['dias_transcurridos'] <= 7]
-            with c1: st.plotly_chart(px.pie(df_f_e, names='Motivo', title="Fuera de Tiempo", color='Motivo', color_discrete_map=color_p), use_container_width=True)
-            with c2: st.plotly_chart(px.pie(df_d_e, names='Motivo', title="En Tiempo", color='Motivo', color_discrete_map=color_p), use_container_width=True)
-            st.markdown("---")
-            st.dataframe(df_esc.sort_values(by='dias_transcurridos', ascending=False).style.apply(lambda r: [f'background-color: {hex_to_rgba("#DC3545" if r.dias_transcurridos > 7 else "#28A745")}; color:black']*len(r), axis=1), use_container_width=True)
+  #  elif pagina == "5. Escalados":
+   #     st.title("🚀 Escalados (Histórico Total)")
+    #    df_esc = load_escalados()
+     #   if df_esc is not None:
+      #      c1, c2 = st.columns(2)
+       #     motivos = df_esc['Motivo'].unique()
+        #    color_p = {m: px.colors.qualitative.Prism[i % 10] for i, m in enumerate(motivos)}
+         #   df_f_e = df_esc[df_esc['dias_transcurridos'] > 7]
+          #  df_d_e = df_esc[df_esc['dias_transcurridos'] <= 7]
+           # with c1: st.plotly_chart(px.pie(df_f_e, names='Motivo', title="Fuera de Tiempo", color='Motivo', color_discrete_map=color_p), use_container_width=True)
+            #with c2: st.plotly_chart(px.pie(df_d_e, names='Motivo', title="En Tiempo", color='Motivo', color_discrete_map=color_p), use_container_width=True)
+            #st.markdown("---")
+            #st.dataframe(df_esc.sort_values(by='dias_transcurridos', ascending=False).style.apply(lambda r: [f'background-color: {hex_to_rgba("#DC3545" if r.dias_transcurridos > 7 else "#28A745")}; color:black']*len(r), axis=1), use_container_width=True)
 
 else:
     st.error("Error al cargar Tickets año.xlsx")
