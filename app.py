@@ -114,7 +114,7 @@ def load_escalados():
 
 # --- SIDEBAR ---
 st.sidebar.title("Menú Principal")
-pagina = st.sidebar.radio("Selecciona:", ["1. Generación", "2. Solución", "3. Contacto", "4. Resumen Anual", "5. Escalados"])
+pagina = st.sidebar.radio("Selecciona:", ["1. Generación", "2. Solución", "3. Contacto", "4. Resumen Anual"])
 selected_year = st.sidebar.selectbox("Año", [2025, 2026], index=1)
 
 df = load_data()
